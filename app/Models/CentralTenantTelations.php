@@ -17,7 +17,6 @@ class CentralTenantTelations extends Model
     // public function __construct(array $attributes = [])
     // {
     //     parent::__construct($attributes);
-
     //     // Use central connection configured for the tenancy package
     //     $this->connection = config('tenancy.central_connection', config('database.default'));
     // }
