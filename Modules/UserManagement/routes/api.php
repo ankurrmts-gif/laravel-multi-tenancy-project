@@ -9,7 +9,9 @@ use Modules\UserManagement\Http\Controllers\Api\AuthController;
 use Modules\UserManagement\Http\Controllers\Api\InvitateUserController;
 use Modules\UserManagement\Http\Controllers\Api\CommonController;
 use Modules\UserManagement\Http\Controllers\Api\UserController;
-use Modules\UserManagement\Http\Controllers\UserManagementController;
+use Modules\UserManagement\Http\Controllers\Api\APUserManagementController;
+use Modules\UserManagement\Http\Controllers\Api\ModuleController;
+use Modules\UserManagement\Http\Controllers\Api\DynamicCrudController;
 
 // Use AuthenticateSanctumMultiTenant so tokens are resolved from central or tenant DBs.
 Route::middleware([\App\Http\Middleware\AuthenticateSanctumMultiTenant::class])->group(function () {
@@ -80,9 +82,30 @@ Route::middleware(\App\Http\Middleware\AuthenticateSanctumMultiTenant::class)->g
     Route::post('update-user', [UserController::class, 'updateUser']);
     Route::delete('/user/{id}', [UserController::class, 'deleteUser']);
     Route::get('get-agency', [UserController::class, 'getAgency']);
+    Route::get('get-admin', [UserController::class, 'getAdmin']);
 
     Route::get('get-all-settings', [CommonController::class, 'getAllSettings']);
     Route::get('get-setting-details', [CommonController::class, 'getSettingDetails']);
     Route::post('add-settings', [CommonController::class, 'addSettings']);
     Route::post('update-settings', [CommonController::class, 'updateSettings']);
+
+    Route::get('/get-column-types', [CommonController::class, 'getColumnTypes']);
+    Route::get('/get-all-models', [CommonController::class, 'getAllModels']);
+    Route::get('/get-all-model-fields/{model_name}', [CommonController::class, 'getAllModelFields']);
+
+    Route::prefix('modules')->group(function () {
+        Route::post('/', [ModuleController::class, 'store']);
+        Route::get('/', [ModuleController::class, 'index']);
+        Route::get('{id}', [ModuleController::class, 'show']);
+        Route::put('{id}', [ModuleController::class, 'update']);
+        Route::delete('{id}', [ModuleController::class, 'destroy']);
+    });
+
+    Route::prefix('dynamic/{slug}')->group(function () {
+        Route::post('/', [DynamicCrudController::class, 'store']);
+        Route::get('/', [DynamicCrudController::class, 'index']);
+        Route::get('{id}', [DynamicCrudController::class, 'show']);
+        Route::put('{id}', [DynamicCrudController::class, 'update']);
+        Route::delete('{id}', [DynamicCrudController::class, 'destroy']);
+    });
 });
