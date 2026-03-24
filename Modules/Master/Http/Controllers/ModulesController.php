@@ -100,10 +100,13 @@ class ModulesController extends Controller
         }
 
         $permissionName = $module->slug . '_access';
+        $permissionCount = ModulePermission::where('module_id', $module->id)->where('permission_name', $permissionName)->count();
 
         // fallback: if no permission is defined for this module, allow it
-        if (! $user->hasPermissionTo($permissionName, 'sanctum')) {
-            return false;
+        if ($permissionCount == 0) {
+            if (! $user->hasPermissionTo($permissionName, 'sanctum')) {
+                return false;
+            }
         }
 
         return true;
@@ -452,106 +455,7 @@ class ModulesController extends Controller
         return response()->json(['success' => true, 'message' => 'Option updated successfully']);
     }
 
-    // private function generateModuleFiles($module)
-    // {
-    //     $modelName = $module->model_name;
-    //     $slug = $module->slug;
-    //     $date = now()->format('Y_m_d_His');
-
-    //     $migrationPaths = [];
-
-    //     // Generate main migration
-    //     $migrationContent = "<?php\n\nuse Illuminate\\Database\\Migrations\\Migration;\nuse Illuminate\\Database\\Schema\\Blueprint;\nuse Illuminate\\Support\\Facades\\Schema;\n\nreturn new class extends Migration\n{\n    public function up(): void\n    {\n        Schema::create('{$slug}', function (Blueprint \$table) {\n            \$table->id();\n";
-
-    //     foreach ($module->fields as $field) {
-    //         $fieldType = $field->columnType->db_type;
-    //         $inputType = $field->columnType->input_type;
-
-    //         if (in_array($inputType, ['file', 'photo'])) {
-    //             if ($field->is_multiple) {
-    //                 // have a separate attachments table for multiple uploads
-    //                 $attachmentTable = strtolower($slug) . '_' . $field->db_column;
-    //                 $attachDate = now()->addSecond()->format('Y_m_d_His');
-    //                 $attachmentMigration = "<?php\n\nuse Illuminate\\Database\\Migrations\\Migration;\nuse Illuminate\\Database\\Schema\\Blueprint;\nuse Illuminate\\Support\\Facades\\Schema;\n\nreturn new class extends Migration\n{\n    public function up(): void\n    {\n        Schema::create('{$attachmentTable}', function (Blueprint \$table) {\n            \$table->id();\n            \$table->unsignedBigInteger('{$slug}_id');\n            \$table->string('file_name');\n            \$table->string('file_path');\n            \$table->string('mime_type')->nullable();\n            \$table->integer('file_size')->nullable();\n            \$table->timestamps();\n            \$table->foreign('{$slug}_id')->references('id')->on('{$slug}')->onDelete('cascade');\n        });\n    }\n\n    public function down(): void\n    {\n        Schema::dropIfExists('{$attachmentTable}');\n    }\n};";
-    //                 $attachmentPath = database_path("migrations/{$attachDate}_create_{$attachmentTable}_table.php");
-    //                 File::put($attachmentPath, $attachmentMigration);
-    //                 $migrationPaths[] = "database/migrations/{$attachDate}_create_{$attachmentTable}_table.php";
-    //                 continue;
-    //             }
-
-    //             $fieldType = 'string';
-    //         }
-
-    //         if (in_array($inputType, ['relation', 'belongsToMany']) && $field->model_name) {
-    //             if ($field->is_multiple) {
-    //                 continue;
-    //             }
-    //             $relatedTable = \Illuminate\Support\Str::plural(strtolower($field->model_name));
-    //             $migrationContent .= "            \$table->unsignedBigInteger('{$field->db_column}')->nullable();\n";
-    //             $migrationContent .= "            \$table->foreign('{$field->db_column}')->references('id')->on('{$relatedTable}')->onDelete('set null');\n";
-    //             continue;
-    //         }
-
-    //         $migrationContent .= "            \$table->{$fieldType}('{$field->db_column}')->nullable();\n";
-    //     }
-
-    //     $migrationContent .= "            \$table->timestamps();\n        });\n    }\n\n    public function down(): void\n    {\n        Schema::dropIfExists('{$slug}');\n    }\n};";
-    //     $migrationPath = database_path("migrations/{$date}_create_{$slug}_table.php");
-    //     File::put($migrationPath, $migrationContent);
-    //     $migrationPaths[] = "database/migrations/{$date}_create_{$slug}_table.php";
-
-    //     // Run migrations for new module + attachment/pivot migrations
-    //     foreach ($migrationPaths as $path) {
-    //         Artisan::call('migrate', ['--path' => $path]);
-    //     }
-
-    //     // Create upload folder for file/photo fields in public
-    //     foreach ($module->fields->whereIn('columnType.input_type', ['file', 'photo']) as $field) {
-    //         $fieldDir = public_path("{$slug}/{$field->db_column}");
-    //         if (!file_exists($fieldDir)) {
-    //             mkdir($fieldDir, 0755, true);
-    //         }
-    //     }
-
-    //     // Generate pivot table migrations for relation multi fields
-    //     foreach ($module->fields as $field) {
-    //         if ($field->columnType->input_type === 'relation' && $field->is_multiple && $field->model_name) {
-    //             $relatedTable = \Illuminate\Support\Str::plural(strtolower($field->model_name));
-    //             $pivotTable = strtolower($slug) . '_' . $relatedTable;
-    //             $pivotDate = now()->addSecond()->format('Y_m_d_His');
-    //             $pivotMigration = "<?php\n\nuse Illuminate\\Database\\Migrations\\Migration;\nuse Illuminate\\Database\\Schema\\Blueprint;\nuse Illuminate\\Support\\Facades\\Schema;\n\nreturn new class extends Migration\n{\n    public function up(): void\n    {\n        Schema::create('{$pivotTable}', function (Blueprint \$table) {\n            \$table->id();\n            \$table->unsignedBigInteger('{$slug}_id');\n            \$table->unsignedBigInteger('{$field->model_name}_id');\n            \$table->foreign('{$slug}_id')->references('id')->on('{$slug}')->onDelete('cascade');\n            \$table->foreign('{$field->model_name}_id')->references('id')->on('{$relatedTable}')->onDelete('cascade');\n            \$table->timestamps();\n        });\n    }\n\n    public function down(): void\n    {\n        Schema::dropIfExists('{$pivotTable}');\n    }\n};";
-    //             $pivotPath = database_path("migrations/{$pivotDate}_create_{$pivotTable}_table.php");
-    //             File::put($pivotPath, $pivotMigration);
-    //             $migrationPaths[] = "database/migrations/{$pivotDate}_create_{$pivotTable}_table.php";
-    //         }
-    //     }
-
-    //     // Generate Model
-    //     $modelContent = "<?php\n\nnamespace App\\Models;\n\nuse Illuminate\\Database\\Eloquent\\Factories\\HasFactory;\nuse Illuminate\\Database\\Eloquent\\Model;\n\nclass {$modelName} extends Model\n{\n    use HasFactory;\n\n    protected \$table = '{$slug}';\n\n    protected \$fillable = [\n";
-    //     $fillables = [];
-    //     foreach ($module->fields as $field) {
-    //         $fillables[] = "        '{$field->db_column}'";
-    //     }
-    //     $modelContent .= implode(",\n", $fillables) . "\n    ];\n\n    protected \$casts = [\n";
-    //     $casts = [];
-    //     foreach ($module->fields as $field) {
-    //         if ($field->columnType->db_type == 'boolean') {
-    //             $casts[] = "        '{$field->db_column}' => 'boolean'";
-    //         }
-    //     }
-    //     $modelContent .= implode(",\n", $casts) . "\n    ];\n}";
-    //     $modelPath = app_path("Models/{$modelName}.php");
-    //     File::put($modelPath, $modelContent);
-
-    //     // Generate Controller
-    //     $controllerContent = "<?php\n\nnamespace App\\Http\\Controllers;\n\nuse App\\Models\\{$modelName};\nuse Illuminate\\Http\\Request;\nuse Illuminate\\Support\\Facades\\Validator;\n\nclass {$modelName}Controller extends Controller\n{\n    public function index()\n    {\n        \$records = {$modelName}::all();\n        return response()->json(['success' => true, 'data' => \$records]);\n    }\n\n    public function store(Request \$request)\n    {\n        \$data = \$request->all();\n        \$record = {$modelName}::create(\$data);\n        return response()->json(['success' => true, 'message' => 'Record created successfully', 'data' => \$record]);\n    }\n\n    public function show(\$id)\n    {\n        \$record = {$modelName}::findOrFail(\$id);\n        return response()->json(['success' => true, 'data' => \$record]);\n    }\n\n    public function update(Request \$request, \$id)\n    {\n        \$record = {$modelName}::findOrFail(\$id);\n        \$record->update(\$request->all());\n        return response()->json(['success' => true, 'message' => 'Record updated successfully']);\n    }\n\n    public function destroy(\$id)\n    {\n        \$record = {$modelName}::findOrFail(\$id);\n        \$record->delete();\n        return response()->json(['success' => true, 'message' => 'Record deleted successfully']);\n    }\n}";
-    //     $controllerPath = app_path("Http/Controllers/{$modelName}Controller.php");
-    //     File::put($controllerPath, $controllerContent);
-
-    //     // Generate route handling via module route definition (do not append to routes/api.php here)
-    //     // Run Migration
-    //     Artisan::call('migrate', ['--path' => "database/migrations/{$date}_create_{$slug}_table.php"]);
-    // }
+    
 
 private function generateModuleFiles($module)
 {
@@ -659,7 +563,12 @@ return new class extends Migration
                 \$table->string('mime_type')->nullable();
                 \$table->integer('file_size')->nullable();
                 \$table->timestamps();
+            });
+        }
 
+        // Add foreign key constraint separately to avoid dependency issues
+        if (Schema::hasTable('{$table}') && !collect(DB::select("SELECT CONSTRAINT_NAME FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE WHERE TABLE_NAME = '{$attachTable}' AND COLUMN_NAME = '{$fk}_id' AND REFERENCED_TABLE_NAME = '{$table}'"))->count()) {
+            Schema::table('{$attachTable}', function (Blueprint \$table) {
                 \$table->foreign('{$fk}_id')->references('id')->on('{$table}')->cascadeOnDelete();
             });
         }
@@ -667,6 +576,13 @@ return new class extends Migration
 
     public function down(): void
     {
+        // Drop foreign key first
+        if (Schema::hasTable('{$attachTable}')) {
+            Schema::table('{$attachTable}', function (Blueprint \$table) {
+                \$table->dropForeign(['{$fk}_id']);
+            });
+        }
+
         Schema::dropIfExists('{$attachTable}');
     }
 };
@@ -719,8 +635,18 @@ return new class extends Migration
                 \$table->unsignedBigInteger('{$fk}_id');
                 \$table->unsignedBigInteger('{$relatedFk}_id');
                 \$table->timestamps();
+            });
+        }
 
+        // Add foreign key constraints separately to avoid dependency issues
+        if (Schema::hasTable('{$table}') && !collect(DB::select("SELECT CONSTRAINT_NAME FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE WHERE TABLE_NAME = '{$pivot}' AND COLUMN_NAME = '{$fk}_id' AND REFERENCED_TABLE_NAME = '{$table}'"))->count()) {
+            Schema::table('{$pivot}', function (Blueprint \$table) {
                 \$table->foreign('{$fk}_id')->references('id')->on('{$table}')->cascadeOnDelete();
+            });
+        }
+
+        if (Schema::hasTable('{$relatedTable}') && !collect(DB::select("SELECT CONSTRAINT_NAME FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE WHERE TABLE_NAME = '{$pivot}' AND COLUMN_NAME = '{$relatedFk}_id' AND REFERENCED_TABLE_NAME = '{$relatedTable}'"))->count()) {
+            Schema::table('{$pivot}', function (Blueprint \$table) {
                 \$table->foreign('{$relatedFk}_id')->references('id')->on('{$relatedTable}')->cascadeOnDelete();
             });
         }
@@ -728,6 +654,14 @@ return new class extends Migration
 
     public function down(): void
     {
+        // Drop foreign keys first
+        if (Schema::hasTable('{$pivot}')) {
+            Schema::table('{$pivot}', function (Blueprint \$table) {
+                \$table->dropForeign(['{$fk}_id']);
+                \$table->dropForeign(['{$relatedFk}_id']);
+            });
+        }
+
         Schema::dropIfExists('{$pivot}');
     }
 };

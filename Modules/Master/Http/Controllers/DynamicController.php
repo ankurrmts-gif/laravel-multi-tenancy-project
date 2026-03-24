@@ -15,11 +15,8 @@ class DynamicController extends Controller
     public function index($slug)
     {
         $module = Module::where('slug', $slug)->with('fields')->firstOrFail();
+        echo "<pre>"; print_r($module); die();
         $tableName = $module->slug;
-
-        if (!Schema::hasTable($tableName)) {
-            $this->createDynamicTable($module);
-        }
 
         $records = DB::table($tableName)->get();
         $records = $this->withRelationData($module, $records);
@@ -393,56 +390,5 @@ class DynamicController extends Controller
         }
 
         return $records;
-    }
-
-    private function createDynamicTable($module)
-    {
-        Schema::create($module->slug, function ($table) use ($module) {
-            $table->id();
-            foreach ($module->fields as $field) {
-                if (in_array($field->columnType->input_type, ['file', 'photo']) && $field->is_multiple) {
-                    // multiple file/photo is stored in separate table
-                    continue;
-                }
-
-                $type = $field->columnType->db_type;
-                if ($type == 'string') {
-                    $table->string($field->db_column)->nullable();
-                } elseif ($type == 'text') {
-                    $table->text($field->db_column)->nullable();
-                } elseif ($type == 'integer') {
-                    $table->integer($field->db_column)->nullable();
-                } elseif ($type == 'boolean') {
-                    $table->boolean($field->db_column)->nullable();
-                } elseif ($type == 'date') {
-                    $table->date($field->db_column)->nullable();
-                } elseif ($type == 'datetime') {
-                    $table->datetime($field->db_column)->nullable();
-                } else {
-                    $table->string($field->db_column)->nullable();
-                } // Add more types as needed
-            }
-            $table->timestamps();
-        });
-
-        foreach ($module->fields as $field) {
-            if (!in_array($field->columnType->input_type, ['file', 'photo']) || !$field->is_multiple) {
-                continue;
-            }
-
-            $attachmentTable = "{$module->slug}_{$field->db_column}";
-            if (!Schema::hasTable($attachmentTable)) {
-                Schema::create($attachmentTable, function ($table) use ($module) {
-                    $table->id();
-                    $table->unsignedBigInteger("{$module->slug}_id");
-                    $table->string('file_name');
-                    $table->string('file_path');
-                    $table->string('mime_type')->nullable();
-                    $table->integer('file_size')->nullable();
-                    $table->timestamps();
-                    $table->foreign("{$module->slug}_id")->references('id')->on($module->slug)->onDelete('cascade');
-                });
-            }
-        }
     }
 }
