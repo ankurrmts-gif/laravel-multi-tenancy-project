@@ -17,6 +17,7 @@ use App\Models\CentralTenantTelations;
 use App\Models\UserInvitations;
 use App\Models\User;
 use App\Models\Settings;
+use App\Models\ColumnTypes;
 use Spatie\Permission\Models\Role;
 use Spatie\Permission\Models\Permission;
 use Illuminate\Support\Facades\DB;
@@ -25,6 +26,8 @@ use Illuminate\Support\Facades\URL;
 use Laravel\Sanctum\PersonalAccessToken;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Validation\Rule;
+use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Schema;
  
 class CommonController extends Controller
 {  
@@ -118,16 +121,48 @@ class CommonController extends Controller
             ], 422);
         }
 
-        foreach ($request->settings as $settingData) {
-
+        foreach ($request->settings as $index => $settingData) {
             $setting = Settings::find($settingData['id']);
 
-            if ($setting) {
-                $setting->update([
-                    'key' => $settingData['key'],
-                    'value' => $settingData['value']
-                ]);
+            if (!$setting) {
+                continue;
             }
+
+            $key = $settingData['key'];
+            $value = $settingData['value'];
+
+            // 🔥 Handle Image Upload
+            if (in_array($key, ['logo', 'favicon_icon'])) {
+                if ($request->hasFile("settings.$index.value")) {
+                    $file = $request->file("settings.$index.value");
+
+                    $folder = public_path('uploads/settings');
+
+                    // 👉 Folder create if not exists
+                    if (!file_exists($folder)) {
+                        mkdir($folder, 0755, true);
+                    }
+
+                    // 👉 Old image delete
+                    if ($setting->value && file_exists(public_path($setting->value))) {
+                        unlink(public_path($setting->value));
+                    }
+
+                    // 👉 New file name
+                    $fileName = time() . '_' . $file->getClientOriginalName();
+
+                    // 👉 Move file to public folder
+                    $file->move($folder, $fileName);
+
+                    // 👉 Save path in DB
+                    $value = 'uploads/settings/' . $fileName;
+                }
+            }
+
+            $setting->update([
+                'key' => $key,
+                'value' => $value
+            ]);
         }
 
         return response()->json([
@@ -186,5 +221,86 @@ class CommonController extends Controller
             'total_agency_invitation' => $totalAgencyInvitation,
             'total_agent_invitation' => $totalAgentInvitation,
         ], 200);
+    }
+
+    public function getColumnTypes(): JsonResponse
+    {
+        try {
+            $types = ColumnTypes::select(
+                'id',
+                'name',
+                'input_type',
+                'db_type',
+                'has_options'
+            )
+            ->where('is_active', 1)
+            ->orderBy('id', 'ASC')
+            ->get();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Column types fetched successfully',
+                'data' => $types
+            ], 200);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Something went wrong',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function getAllModels(): JsonResponse
+    {
+        try {
+            $models = collect(File::files(app_path('Models')))
+                ->map(function ($file) {
+                    return pathinfo($file, PATHINFO_FILENAME);
+                });
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Models fetched successfully',
+                'data' => $models
+            ], 200);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Something went wrong',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function getAllModelFields($model_name): JsonResponse
+    {
+        try {
+            $modelClass = 'App\\Models\\' . $model_name;
+
+            if (!class_exists($modelClass)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Model not found'
+                ], 404);
+            }
+
+            $modelInstance = new $modelClass;
+            $tableName = $modelInstance->getTable();
+            $fields = Schema::getColumnListing($tableName);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Model fields fetched successfully',
+                'data' => $fields
+            ], 200);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Something went wrong',
+                'error' => $e->getMessage()
+            ], 500);
+        }
     }
 }

@@ -397,4 +397,13 @@ class UserController extends Controller
             'agency' => $tenant
         ],200);
     }
+
+    public function getAdmin(Request $request)
+    {
+        $admin = User::select('id', 'name')->where('user_type','admin')->get();
+ 
+        return response()->json([
+            'admin' => $admin
+        ],200);
+    }
 }
