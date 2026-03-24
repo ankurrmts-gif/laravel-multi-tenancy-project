@@ -5,19 +5,24 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
-class Country extends Model
+class Project extends Model
 {
+
     use HasFactory;
 
-    protected $table = 'countries';
+    protected $table = 'project';
 
     protected $fillable = [
         'name',
-        'code',
-        'status'
+        'summary',
+        'cover_image',
+        'files',
+        'photo',
+        'feature_ids'
     ];
 
     protected $casts = [
 
     ];
+
 }

@@ -21,7 +21,7 @@ return new class extends Migration
             $table->string('icon')->nullable();
             $table->string('user_type')->default('Admin'); // Admin or Agency
             $table->integer('order_number')->default(0);
-            $table->string('tenant_id');
+            $table->string('tenant_id')->nullable();
             $table->json('actions')->nullable(); // {"create": true, "edit": true, etc.}
             $table->unsignedBigInteger('created_by');
             $table->timestamps();
