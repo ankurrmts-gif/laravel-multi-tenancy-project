@@ -6,17 +6,20 @@ use Spatie\Permission\Models\Role as SpatieRole;
 
 class Role extends SpatieRole
 {
-    protected $connection = null; // dynamically set thase
+    protected $connection = null; // dynamically set
 
     public function __construct(array $attributes = [])
     {
         parent::__construct($attributes);
 
-        // Check tenant context
         if (tenant()) {
             $this->setConnection('tenant');
         } else {
-            $this->setConnection('central');
+            $centralConnection = config('tenancy.database.central_connection', config('database.default'));
+            if (!array_key_exists($centralConnection, config('database.connections', []))) {
+                $centralConnection = config('database.default');
+            }
+            $this->setConnection($centralConnection);
         }
     }
 }
