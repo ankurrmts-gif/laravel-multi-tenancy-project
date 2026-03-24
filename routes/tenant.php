@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Illuminate\Support\Facades\Route;
 use Stancl\Tenancy\Middleware\InitializeTenancyByDomain;
 use Stancl\Tenancy\Middleware\PreventAccessFromCentralDomains;
+use Modules\Master\Http\Controllers\DynamicController;
 
 /*
 |--------------------------------------------------------------------------
@@ -17,6 +18,13 @@ use Stancl\Tenancy\Middleware\PreventAccessFromCentralDomains;
 | Feel free to customize them however you want. Good luck!
 |
 */
+
+// Dynamic CRUD APIs
+Route::get('dynamic/{slug}', [DynamicController::class, 'index']);
+Route::post('dynamic/{slug}', [DynamicController::class, 'store']);
+Route::get('dynamic/{slug}/{id}', [DynamicController::class, 'show']);
+Route::put('dynamic/{slug}/{id}', [DynamicController::class, 'update']);
+Route::delete('dynamic/{slug}/{id}', [DynamicController::class, 'destroy']);
 
 Route::middleware([
     'web',

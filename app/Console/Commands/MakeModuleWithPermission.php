@@ -26,13 +26,19 @@ class MakeModuleWithPermission extends Command
 
         $moduleSlug = Str::slug($moduleName);
 
-        $permissions = [
-            $moduleSlug.'-list',
-            $moduleSlug.'-create',
-            $moduleSlug.'-edit',
-            $moduleSlug.'-delete',
-            $moduleSlug.'-view',
+        $permissionActions = [
+            'access',
+            'add',
+            'create',
+            'edit',
+            'update',
+            'delete',
+            'view',
         ];
+
+        $permissions = collect($permissionActions)->map(function ($action) use ($moduleSlug) {
+            return $moduleSlug . '_' . $action;
+        })->toArray();
 
         foreach ($permissions as $permission) {
             Permission::firstOrCreate([
@@ -41,12 +47,13 @@ class MakeModuleWithPermission extends Command
             ]);
         }
 
-        // Assign to Super Admin
-        $superAdmin = Role::where('name','Super Admin')->first();
+        // Assign to Super Admin role (create if missing)
+        $superAdmin = Role::firstOrCreate([
+            'name' => 'Super Admin',
+            'guard_name' => 'sanctum',
+        ]);
 
-        if($superAdmin){
-            $superAdmin->givePermissionTo($permissions);
-        }
+        $superAdmin->givePermissionTo($permissions);
 
         $this->info('Module created with permissions successfully.');
     }
