@@ -27,6 +27,7 @@ return new class extends Migration
             $table->string('model_field_name')->nullable();
             $table->integer('max_file_size')->nullable();
             $table->integer('order_number')->default(0);
+            $table->json('visibility')->nullable(); // {"create": true, "edit": true, etc.}
             $table->boolean('is_checked')->default(false);
             $table->timestamps();
 

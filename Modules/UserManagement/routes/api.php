@@ -93,13 +93,13 @@ Route::middleware(\App\Http\Middleware\AuthenticateSanctumMultiTenant::class)->g
     Route::get('/get-all-models', [CommonController::class, 'getAllModels']);
     Route::get('/get-all-model-fields/{model_name}', [CommonController::class, 'getAllModelFields']);
 
-    Route::prefix('modules')->group(function () {
-        Route::post('/', [ModuleController::class, 'store']);
-        Route::get('/', [ModuleController::class, 'index']);
-        Route::get('{id}', [ModuleController::class, 'show']);
-        Route::put('{id}', [ModuleController::class, 'update']);
-        Route::delete('{id}', [ModuleController::class, 'destroy']);
-    });
+    // Route::prefix('modules')->group(function () {
+    //     Route::post('/', [ModuleController::class, 'store']);
+    //     Route::get('/', [ModuleController::class, 'index']);
+    //     Route::get('{id}', [ModuleController::class, 'show']);
+    //     Route::put('{id}', [ModuleController::class, 'update']);
+    //     Route::delete('{id}', [ModuleController::class, 'destroy']);
+    // });
 
     Route::prefix('dynamic/{slug}')->group(function () {
         Route::post('/', [DynamicCrudController::class, 'store']);

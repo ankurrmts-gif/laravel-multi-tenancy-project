@@ -24,6 +24,7 @@ class ModuleField extends Model
         'model_field_name',
         'max_file_size',
         'order_number',
+        'visibility',
         'is_checked',
     ];
 
@@ -32,6 +33,7 @@ class ModuleField extends Model
         'is_ckeditor' => 'boolean',
         'is_multiple' => 'boolean',
         'is_checked' => 'boolean',
+        'visibility' => 'array',
     ];
 
     public function module()

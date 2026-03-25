@@ -10,7 +10,7 @@ class Module extends Model
     use HasFactory;
 
     protected $fillable = [
-        'model_name',
+        'main_model_name',
         'slug',
         'menu_title',
         'parent_menu',
