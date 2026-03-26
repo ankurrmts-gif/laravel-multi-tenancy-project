@@ -438,50 +438,69 @@ class DynamicController extends Controller
                 'name' => $field->db_column,
                 'label' => $field->label,
                 'type' => $field->columnType->input_type ?? 'text',
-                'is_multiple' => (bool) $field->is_multiple,
                 'validation' => $field->validation,
-                'value' => null,
+                'tooltip_text' => $field->tooltip_text,
+                'is_ckeditor' => $field->is_ckeditor,
+                'default_value' => $field->default_value,
+                'is_multiple' => (bool) $field->is_multiple,
+                'max_file_size' => $field->max_file_size,
+                'order_number' => $field->order_number,
+                'visibility' => $field->visibility,
+                'is_checked' => $field->is_checked,
+                'value' => null
             ];
 
             /*
-            |--------------------------------------------------
-            | NORMAL FIELD VALUE
-            |--------------------------------------------------
-            */
-            if (!$field->is_multiple && !in_array($inputType, [14,15])) {
-                $fieldData['value'] = $data->{$field->db_column};
-            }
-
-            /*
-            |--------------------------------------------------
-            | STATIC SELECT
-            |--------------------------------------------------
+            |------------------------------------------
+            | STATIC SELECT (STATUS, TAGS, ETC)
+            |------------------------------------------
             */
             if ($inputType == 3 && !$field->model_name) {
 
                 $options = DB::table('module_field_options')
                     ->where('module_field_id', $field->id)
-                    ->get(['label','value']);
+                    ->get(['option_label', 'option_value']);
 
-                $selected = $field->is_multiple
+                $fieldData['options'] = $options;
+
+                $fieldData['value'] = $field->is_multiple
                     ? json_decode($data->{$field->db_column}, true)
                     : $data->{$field->db_column};
 
+                $response['fields'][] = $fieldData;
+                continue;
+            }
+
+            if (in_array($inputType, [5,6])) {
+
+                $options = DB::table('module_field_options')->where('module_field_id', $field->id)->get();
+
+                $selected = $data->{$field->db_column} ?? null;
+
+                 $options = DB::table('module_field_options')
+                    ->where('module_field_id', $field->id)
+                    ->get(['option_label', 'option_value']);
+
                 $fieldData['options'] = $options;
+
                 $fieldData['value'] = $selected;
+
+                $response['fields'][] = $fieldData;
+                continue;
             }
 
             /*
-            |--------------------------------------------------
-            | DYNAMIC SELECT
-            |--------------------------------------------------
+            |------------------------------------------
+            | DYNAMIC SELECT (RELATION)
+            |------------------------------------------
             */
-            if ($inputType == 3 && $field->model_name) {
+            if ($field->model_name) {
 
                 $relatedTable = strtolower(Str::plural($field->model_name));
                 $relatedFk = strtolower(Str::singular($field->model_name));
 
                 $options = DB::table($relatedTable)->get();
+                $fieldData['options'] = $options;
 
                 if ($field->is_multiple) {
 
@@ -494,33 +513,20 @@ class DynamicController extends Controller
                         ->pluck("{$relatedFk}_id")
                         ->toArray();
 
+                    $fieldData['value'] = $selected;
+
                 } else {
-                    $selected = $data->{$field->db_column};
+                    $fieldData['value'] = $data->{$field->db_column};
                 }
 
-                $fieldData['options'] = $options;
-                $fieldData['value'] = $selected;
+                $response['fields'][] = $fieldData;
+                continue;
             }
 
             /*
-            |--------------------------------------------------
-            | SINGLE FILE / IMAGE
-            |--------------------------------------------------
-            */
-            if (in_array($inputType, [14,15]) && !$field->is_multiple) {
-
-                if (!empty($data->{$field->db_column})) {
-                    $fieldData['value'] = [
-                        'path' => $data->{$field->db_column},
-                        'url' => url('storage/' . $data->{$field->db_column})
-                    ];
-                }
-            }
-
-            /*
-            |--------------------------------------------------
+            |------------------------------------------
             | MULTIPLE FILES / IMAGES
-            |--------------------------------------------------
+            |------------------------------------------
             */
             if (in_array($inputType, [14,15]) && $field->is_multiple) {
 
@@ -539,6 +545,38 @@ class DynamicController extends Controller
                     });
 
                 $fieldData['value'] = $files;
+
+                $response['fields'][] = $fieldData;
+                continue;
+            }
+
+            /*
+            |------------------------------------------
+            | SINGLE FILE / IMAGE
+            |------------------------------------------
+            */
+            if (in_array($inputType, [14,15]) && !$field->is_multiple) {
+
+                if (!empty($data->{$field->db_column})) {
+                    $fieldData['value'] = [
+                        'path' => $data->{$field->db_column},
+                        'url' => url('storage/' . $data->{$field->db_column})
+                    ];
+                }
+
+                $response['fields'][] = $fieldData;
+                continue;
+            }
+
+            /*
+            |------------------------------------------
+            | NORMAL FIELD (TEXT, NUMBER, ETC)
+            |------------------------------------------
+            */
+            if ($field->is_multiple && $inputType == 3) {
+                $fieldData['value'] = json_decode($data->{$field->db_column}, true);
+            } else {
+                $fieldData['value'] = $data->{$field->db_column};
             }
 
             $response['fields'][] = $fieldData;
@@ -552,39 +590,84 @@ class DynamicController extends Controller
     | UPDATE
     |--------------------------------------------------
     */
-    public function update(Request $request, $slug, $id)
+    public function update(Request $request, $slug)
     {
         $module = $this->getModule($slug);
-        $table = Str::plural($module->slug);
-        $fk = Str::singular($module->slug);
+        $table  = Str::plural($module->slug);
+        $fk     = Str::singular($module->slug);
+        $id     = $request->id;
 
         $data = [];
 
+        /*
+        |--------------------------------------------------
+        | MAIN TABLE UPDATE (NORMAL + SINGLE FILE)
+        |--------------------------------------------------
+        */
         foreach ($module->fields as $field) {
 
             $inputType = $field->column_type_id ?? $field->columnType->column_type_id;
 
-            if (in_array($inputType, [14,15])) {
+            /*
+            |------------------------------------------
+            | SINGLE FILE / IMAGE
+            |------------------------------------------
+            */
+            if (in_array($inputType, [14,15]) && !$field->is_multiple) {
 
-                if (!$field->is_multiple) {
-                    $file = $this->handleSingleFile($request, $table, $field);
-                    if ($file) {
-                        $data[$field->db_column] = $file;
+                if ($request->hasFile($field->db_column)) {
+
+                    // 🔥 DELETE OLD FILE
+                    $oldFile = DB::table($table)
+                        ->where('id', $id)
+                        ->value($field->db_column);
+
+                    if ($oldFile && Storage::disk('public')->exists($oldFile)) {
+                        Storage::disk('public')->delete($oldFile);
                     }
+
+                    // 🔥 UPLOAD NEW FILE
+                    $path = $request->file($field->db_column)
+                        ->store($table, 'public');
+
+                    $data[$field->db_column] = $path;
                 }
 
                 continue;
             }
 
-            if (!$field->is_multiple) {
+            /*
+            |------------------------------------------
+            | STATIC MULTI SELECT (JSON)
+            |------------------------------------------
+            */
+            if ($field->is_multiple && !$field->model_name && $inputType == 3) {
+
+                $data[$field->db_column] = json_encode(
+                    $request->{$field->db_column} ?? []
+                );
+
+                continue;
+            }
+
+            /*
+            |------------------------------------------
+            | NORMAL FIELD
+            |------------------------------------------
+            */
+            if (!$field->is_multiple && !$field->model_name) {
+
                 $data[$field->db_column] = $request->{$field->db_column};
             }
         }
 
+        // ✅ UPDATE MAIN TABLE
         DB::table($table)->where('id', $id)->update($data);
 
         /*
-        | MULTIPLE FILES (OPTIONAL: delete old)
+        |--------------------------------------------------
+        | MULTIPLE FILES (DELETE ONLY IF NEW UPLOADED)
+        |--------------------------------------------------
         */
         foreach ($module->fields as $field) {
 
@@ -594,22 +677,111 @@ class DynamicController extends Controller
 
                 $attachTable = "{$table}_" . Str::plural($field->db_column);
 
-                DB::table($attachTable)->where("{$fk}_id", $id)->delete();
+                // ✅ Get uploaded files (handles photos[])
+                $files = $request->file($field->db_column);
 
-                $filesData = $this->handleMultipleFiles($request, $table, $fk, $field, $id);
+                if (!empty($files)) {
 
-                if (!empty($filesData)) {
-                    DB::table($attachTable)->insert($filesData);
+                    /*
+                    |------------------------------------------
+                    | DELETE OLD FILES FROM STORAGE
+                    |------------------------------------------
+                    */
+                    $oldFiles = DB::table($attachTable)
+                        ->where("{$fk}_id", $id)
+                        ->get();
+
+                    foreach ($oldFiles as $file) {
+
+                        if (!empty($file->file_path) &&
+                            Storage::disk('public')->exists($file->file_path)) {
+
+                            Storage::disk('public')->delete($file->file_path);
+                        }
+                    }
+
+                    /*
+                    |------------------------------------------
+                    | DELETE OLD DB RECORDS
+                    |------------------------------------------
+                    */
+                    DB::table($attachTable)
+                        ->where("{$fk}_id", $id)
+                        ->delete();
+
+                    /*
+                    |------------------------------------------
+                    | INSERT NEW FILES
+                    |------------------------------------------
+                    */
+                    $filesData = [];
+
+                    foreach ($files as $file) {
+
+                        $path = $file->store($table . '/' . $field->db_column, 'public');
+
+                        $filesData[] = [
+                            "{$fk}_id" => $id,
+                            'file_name' => $file->getClientOriginalName(),
+                            'file_path' => $path,
+                            'mime_type' => $file->getClientMimeType(),
+                            'file_size' => $file->getSize(),
+                            'created_at' => now(),
+                            'updated_at' => now(),
+                        ];
+                    }
+
+                    if (!empty($filesData)) {
+                        DB::table($attachTable)->insert($filesData);
+                    }
                 }
             }
         }
 
         /*
-        | PIVOT
+        |--------------------------------------------------
+        | PIVOT (MANY TO MANY)
+        |--------------------------------------------------
         */
-        $this->handlePivot($request, $module, $id);
+        foreach ($module->fields as $field) {
 
-        return response()->json(['message' => 'Updated']);
+            if ($field->model_name && $field->is_multiple) {
+
+                $relatedTable = strtolower(Str::plural($field->model_name));
+                $relatedFk    = strtolower(Str::singular($field->model_name));
+
+                $tables = [$table, $relatedTable];
+                sort($tables);
+                $pivot = implode('_', $tables);
+
+                // 🔥 DELETE OLD
+                DB::table($pivot)
+                    ->where("{$fk}_id", $id)
+                    ->delete();
+
+                // 🔥 INSERT NEW
+                $values = $request->{$field->db_column} ?? [];
+
+                $insertData = [];
+
+                foreach ($values as $val) {
+                    $insertData[] = [
+                        "{$fk}_id" => $id,
+                        "{$relatedFk}_id" => $val,
+                        'created_at' => now(),
+                        'updated_at' => now(),
+                    ];
+                }
+
+                if (!empty($insertData)) {
+                    DB::table($pivot)->insert($insertData);
+                }
+            }
+        }
+
+        return response()->json([
+            'message' => 'Updated successfully'
+        ]);
     }
 
     /*
@@ -620,10 +792,97 @@ class DynamicController extends Controller
     public function destroy($slug, $id)
     {
         $module = $this->getModule($slug);
-        $table = Str::plural($module->slug);
+        $table  = Str::plural($module->slug);
+        $fk     = Str::singular($module->slug);
 
+        $data = DB::table($table)->where('id', $id)->first();
+
+        if (!$data) {
+            return response()->json(['message' => 'Not found'], 404);
+        }
+
+        /*
+        |--------------------------------------------------
+        | DELETE FILES (SINGLE + MULTIPLE)
+        |--------------------------------------------------
+        */
+        foreach ($module->fields as $field) {
+
+            $inputType = $field->column_type_id ?? $field->columnType->column_type_id;
+
+            /*
+            |------------------------------------------
+            | SINGLE FILE
+            |------------------------------------------
+            */
+            if (in_array($inputType, [14,15]) && !$field->is_multiple) {
+
+                $filePath = $data->{$field->db_column};
+
+                if (!empty($filePath) && Storage::disk('public')->exists($filePath)) {
+                    Storage::disk('public')->delete($filePath);
+                }
+            }
+
+            /*
+            |------------------------------------------
+            | MULTIPLE FILES
+            |------------------------------------------
+            */
+            if (in_array($inputType, [14,15]) && $field->is_multiple) {
+
+                $attachTable = "{$table}_" . Str::plural($field->db_column);
+
+                $files = DB::table($attachTable)
+                    ->where("{$fk}_id", $id)
+                    ->get();
+
+                // 🔥 DELETE FILES FROM STORAGE
+                foreach ($files as $file) {
+                    if (!empty($file->file_path) &&
+                        Storage::disk('public')->exists($file->file_path)) {
+
+                        Storage::disk('public')->delete($file->file_path);
+                    }
+                }
+
+                // 🔥 DELETE DB RECORDS
+                DB::table($attachTable)
+                    ->where("{$fk}_id", $id)
+                    ->delete();
+            }
+        }
+
+        /*
+        |--------------------------------------------------
+        | DELETE PIVOT (MANY TO MANY)
+        |--------------------------------------------------
+        */
+        foreach ($module->fields as $field) {
+
+            if ($field->model_name && $field->is_multiple) {
+
+                $relatedTable = strtolower(Str::plural($field->model_name));
+
+                $tables = [$table, $relatedTable];
+                sort($tables);
+                $pivot = implode('_', $tables);
+
+                DB::table($pivot)
+                    ->where("{$fk}_id", $id)
+                    ->delete();
+            }
+        }
+
+        /*
+        |--------------------------------------------------
+        | DELETE MAIN RECORD
+        |--------------------------------------------------
+        */
         DB::table($table)->where('id', $id)->delete();
 
-        return response()->json(['message' => 'Deleted']);
+        return response()->json([
+            'message' => 'Deleted successfully'
+        ]);
     }
 }
