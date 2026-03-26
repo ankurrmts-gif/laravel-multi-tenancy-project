@@ -101,11 +101,11 @@ Route::middleware(\App\Http\Middleware\AuthenticateSanctumMultiTenant::class)->g
     //     Route::delete('{id}', [ModuleController::class, 'destroy']);
     // });
 
-    Route::prefix('dynamic/{slug}')->group(function () {
-        Route::post('/', [DynamicCrudController::class, 'store']);
-        Route::get('/', [DynamicCrudController::class, 'index']);
-        Route::get('{id}', [DynamicCrudController::class, 'show']);
-        Route::put('{id}', [DynamicCrudController::class, 'update']);
-        Route::delete('{id}', [DynamicCrudController::class, 'destroy']);
-    });
+    // Route::prefix('dynamic/{slug}')->group(function () {
+    //     Route::post('/', [DynamicCrudController::class, 'store']);
+    //     Route::get('/', [DynamicCrudController::class, 'index']);
+    //     Route::get('{id}', [DynamicCrudController::class, 'show']);
+    //     Route::put('{id}', [DynamicCrudController::class, 'update']);
+    //     Route::delete('{id}', [DynamicCrudController::class, 'destroy']);
+    // });
 });

@@ -26,4 +26,9 @@ class ColumnType extends Model
     {
         return $this->hasMany(ModuleField::class);
     }
+
+    public function columnType()
+    {
+        return $this->belongsTo(ColumnType::class, 'column_type_id');
+    }
 }
