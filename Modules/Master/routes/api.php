@@ -11,7 +11,7 @@ use Modules\Master\Http\Controllers\DynamicController;
 |--------------------------------------------------------------------------
 */
 
-Route::middleware(\App\Http\Middleware\AuthenticateSanctumMultiTenant::class)->group(function () {
+//Route::middleware(\App\Http\Middleware\AuthenticateSanctumMultiTenant::class)->group(function () {
 
     // Column Types APIs
     Route::apiResource('types', ColumnTypesController::class);
@@ -36,8 +36,9 @@ Route::middleware(\App\Http\Middleware\AuthenticateSanctumMultiTenant::class)->g
     // Dynamic CRUD APIs
     Route::get('dynamic/{slug}', [DynamicController::class, 'index']);
     Route::post('dynamic/{slug}', [DynamicController::class, 'store']);
+    Route::get('dynamic/create/{slug}', [DynamicController::class, 'create']);
     Route::get('dynamic/{slug}/{id}', [DynamicController::class, 'show']);
     Route::put('dynamic/{slug}/{id}', [DynamicController::class, 'update']);
     Route::delete('dynamic/{slug}/{id}', [DynamicController::class, 'destroy']);
 
-});
+//});
