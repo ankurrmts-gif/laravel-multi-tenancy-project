@@ -305,6 +305,7 @@ class DynamicController extends Controller
 
         $response = [
             'data' => (array) $data,
+            'relations' => []
         ];
 
         /*
@@ -314,7 +315,11 @@ class DynamicController extends Controller
         */
         foreach ($module->fields as $field) {
 
-            // MANY TO MANY (MULTIPLE SELECT)
+            /*
+            |------------------------------------------
+            | MANY TO MANY (MULTI SELECT)
+            |------------------------------------------
+            */
             if ($field->model_name && $field->is_multiple) {
 
                 $relatedTable = strtolower(Str::plural($field->model_name));
@@ -333,14 +338,19 @@ class DynamicController extends Controller
                     ->pluck("{$relatedFk}_id")
                     ->toArray();
 
-                $response['data'][$field->db_column] = [
+                $response['relations'][$field->db_column] = [
+                    'type' => 'multi_select',
                     'options' => $options,
                     'selected' => $selected
                 ];
             }
 
-            // BELONGS TO (SINGLE SELECT)
-            if ($field->model_name && !$field->is_multiple) {
+            /*
+            |------------------------------------------
+            | BELONGS TO (SINGLE SELECT)
+            |------------------------------------------
+            */
+            elseif ($field->model_name && !$field->is_multiple) {
 
                 $relatedTable = strtolower(Str::plural($field->model_name));
 
@@ -348,12 +358,12 @@ class DynamicController extends Controller
 
                 $selected = $data->{$field->db_column} ?? null;
 
-                $response['data'][$field->db_column] = [
+                $response['relations'][$field->db_column] = [
+                    'type' => 'single_select',
                     'options' => $options,
                     'selected' => $selected
                 ];
             }
-            
         }
 
         /*
@@ -396,6 +406,142 @@ class DynamicController extends Controller
                     'selected' => $selected
                 ];
             }
+        }
+
+        return response()->json($response);
+    }
+
+    //Edit
+
+    public function edit($slug, $id)
+    {
+        $module = $this->getModule($slug);
+        $table = Str::plural($module->slug);
+        $fk = Str::singular($module->slug);
+
+        $data = DB::table($table)->where('id', $id)->first();
+
+        if (!$data) {
+            return response()->json(['message' => 'Not found'], 404);
+        }
+
+        $response = [
+            'module' => $module,
+            'fields' => []
+        ];
+
+        foreach ($module->fields as $field) {
+
+            $inputType = $field->column_type_id ?? $field->columnType->column_type_id;
+
+            $fieldData = [
+                'name' => $field->db_column,
+                'label' => $field->label,
+                'type' => $field->columnType->input_type ?? 'text',
+                'is_multiple' => (bool) $field->is_multiple,
+                'validation' => $field->validation,
+                'value' => null,
+            ];
+
+            /*
+            |--------------------------------------------------
+            | NORMAL FIELD VALUE
+            |--------------------------------------------------
+            */
+            if (!$field->is_multiple && !in_array($inputType, [14,15])) {
+                $fieldData['value'] = $data->{$field->db_column};
+            }
+
+            /*
+            |--------------------------------------------------
+            | STATIC SELECT
+            |--------------------------------------------------
+            */
+            if ($inputType == 3 && !$field->model_name) {
+
+                $options = DB::table('module_field_options')
+                    ->where('module_field_id', $field->id)
+                    ->get(['label','value']);
+
+                $selected = $field->is_multiple
+                    ? json_decode($data->{$field->db_column}, true)
+                    : $data->{$field->db_column};
+
+                $fieldData['options'] = $options;
+                $fieldData['value'] = $selected;
+            }
+
+            /*
+            |--------------------------------------------------
+            | DYNAMIC SELECT
+            |--------------------------------------------------
+            */
+            if ($inputType == 3 && $field->model_name) {
+
+                $relatedTable = strtolower(Str::plural($field->model_name));
+                $relatedFk = strtolower(Str::singular($field->model_name));
+
+                $options = DB::table($relatedTable)->get();
+
+                if ($field->is_multiple) {
+
+                    $tables = [$table, $relatedTable];
+                    sort($tables);
+                    $pivot = implode('_', $tables);
+
+                    $selected = DB::table($pivot)
+                        ->where("{$fk}_id", $id)
+                        ->pluck("{$relatedFk}_id")
+                        ->toArray();
+
+                } else {
+                    $selected = $data->{$field->db_column};
+                }
+
+                $fieldData['options'] = $options;
+                $fieldData['value'] = $selected;
+            }
+
+            /*
+            |--------------------------------------------------
+            | SINGLE FILE / IMAGE
+            |--------------------------------------------------
+            */
+            if (in_array($inputType, [14,15]) && !$field->is_multiple) {
+
+                if (!empty($data->{$field->db_column})) {
+                    $fieldData['value'] = [
+                        'path' => $data->{$field->db_column},
+                        'url' => url('storage/' . $data->{$field->db_column})
+                    ];
+                }
+            }
+
+            /*
+            |--------------------------------------------------
+            | MULTIPLE FILES / IMAGES
+            |--------------------------------------------------
+            */
+            if (in_array($inputType, [14,15]) && $field->is_multiple) {
+
+                $attachTable = "{$table}_" . Str::plural($field->db_column);
+
+                $files = DB::table($attachTable)
+                    ->where("{$fk}_id", $id)
+                    ->get()
+                    ->map(function ($file) {
+                        return [
+                            'id' => $file->id,
+                            'name' => $file->file_name,
+                            'path' => $file->file_path,
+                            'url' => url('storage/' . $file->file_path)
+                        ];
+                    });
+
+                $fieldData['value'] = $files;
+            }
+
+            $response['fields'][] = $fieldData;
         }
 
         return response()->json($response);
