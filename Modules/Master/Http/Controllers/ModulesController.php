@@ -197,8 +197,8 @@ class ModulesController extends Controller
         }
 
         $moduleData = $request->input('module');
-        //$user = auth()->user();
-        $user = User::find(1);
+        $user = auth()->user();
+        // $user = User::find(1);
 
         $resolvedTenantId = $this->resolveTenantId($request, $moduleData);
         if ($resolvedTenantId !== null) {

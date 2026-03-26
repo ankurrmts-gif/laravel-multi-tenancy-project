@@ -131,31 +131,48 @@ class CommonController extends Controller
             $key = $settingData['key'];
             $value = $settingData['value'];
 
-            // 🔥 Handle Image Upload
+            // 🔥 Handle Base64 Image Upload (logo & favicon)
             if (in_array($key, ['logo', 'favicon_icon'])) {
-                if ($request->hasFile("settings.$index.value")) {
-                    $file = $request->file("settings.$index.value");
+                $base64 = $request->input("settings.$index.value");
 
-                    $folder = public_path('uploads/settings');
+                if ($base64) {
+                    // 👉 Check base64 format (data:image/png;base64,...)
+                    if (preg_match('/^data:image\/(\w+);base64,/', $base64, $type)) {
+                        $image = substr($base64, strpos($base64, ',') + 1);
+                        $image = base64_decode($image);
 
-                    // 👉 Folder create if not exists
-                    if (!file_exists($folder)) {
-                        mkdir($folder, 0755, true);
+                        if ($image === false) {
+                            throw new \Exception('Base64 decode failed');
+                        }
+
+                        $extension = strtolower($type[1]); // png, jpg, jpeg, svg, ico
+
+                        // 👉 Allowed extensions
+                        if (!in_array($extension, ['jpg', 'jpeg', 'png', 'gif', 'webp', 'ico'])) {
+                            throw new \Exception('Invalid image type');
+                        }
+
+                        // 👉 Folder path
+                        $folder = public_path('uploads/settings');
+
+                        if (!file_exists($folder)) {
+                            mkdir($folder, 0755, true);
+                        }
+
+                        // 👉 Old image delete
+                        if ($setting->value && file_exists(public_path($setting->value))) {
+                            unlink(public_path($setting->value));
+                        }
+
+                        // 👉 File name generate
+                        $fileName = time() . '_' . uniqid() . '.' . $extension;
+
+                        // 👉 Save image
+                        file_put_contents($folder . '/' . $fileName, $image);
+
+                        // 👉 Save path in DB
+                        $value = 'uploads/settings/' . $fileName;
                     }
-
-                    // 👉 Old image delete
-                    if ($setting->value && file_exists(public_path($setting->value))) {
-                        unlink(public_path($setting->value));
-                    }
-
-                    // 👉 New file name
-                    $fileName = time() . '_' . $file->getClientOriginalName();
-
-                    // 👉 Move file to public folder
-                    $file->move($folder, $fileName);
-
-                    // 👉 Save path in DB
-                    $value = 'uploads/settings/' . $fileName;
                 }
             }
 

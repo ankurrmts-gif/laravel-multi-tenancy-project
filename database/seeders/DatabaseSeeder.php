@@ -203,7 +203,7 @@ class DatabaseSeeder extends Seeder
                 'id' => 7,
                 'name' => 'Checkbox',
                 'input_type' => 'checkbox',
-                'db_type' => 'json',
+                'db_type' => 'string',
                 'has_options' => 1,
                 'is_active' => 1,
                 'created_at' => now(),
