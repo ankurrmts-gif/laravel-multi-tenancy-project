@@ -18,7 +18,7 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
-        $this->call(ColumnTypesSeeder::class);
+        //$this->call(ColumnTypesSeeder::class);
 
          /** -------------------------------------------------
          * ALWAYS USE CENTRAL DB
