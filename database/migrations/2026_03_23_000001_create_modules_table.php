@@ -19,7 +19,7 @@ return new class extends Migration
             $table->unsignedBigInteger('parent_menu')->nullable();
             $table->boolean('status')->default(true);
             $table->string('icon')->nullable();
-            $table->string('user_type')->default('Admin'); // Admin or Agency
+            $table->string('user_type')->nullable(); // Admin or Agency
             $table->integer('order_number')->default(0);
             $table->string('tenant_id')->nullable();
             $table->json('actions')->nullable(); // {"create": true, "edit": true, etc.}

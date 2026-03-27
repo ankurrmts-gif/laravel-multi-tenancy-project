@@ -6,7 +6,7 @@ use App\Models\ModuleField;
 use App\Models\ModuleFieldOption;
 use App\Models\ModulePermission;
 use App\Models\Role;
-use App\Models\User;
+use App\Models\User,App\Models\Tenant,App\Models\CentralTenantTelations;
 use App\Services\ModuleFileStructureService;
 use DB;
 use Illuminate\Http\Request;
@@ -56,7 +56,7 @@ class ModulesController extends Controller
     public function index(Request $request)
     {
         if($request->type == 'menu'){
-            $user = auth()->user();
+            $user = $request->user();
 
             $modules = Module::where('status', true)->orderBy('order_number')->get();
 
@@ -181,7 +181,7 @@ class ModulesController extends Controller
             'module.parent_menu'           => 'nullable|integer',
             'module.status'                => 'boolean',
             'module.icon'                  => 'nullable|string',
-            'module.user_type'             => 'required|string',
+            'module.user_type'             => 'required_without:module.tenant_id|string',
             'module.order_number'          => 'integer',
             'module.tenant_id'             => 'nullable|string',
             'module.actions'               => 'nullable|array',
@@ -201,6 +201,8 @@ class ModulesController extends Controller
         $moduleData = $request->input('module');
         $user = auth()->user();
         //$user = User::find(1); // replace with auth()->user()
+
+        //echo "<pre>"; print_r($user); die();
 
         // Resolve tenant
         $resolvedTenantId = $this->resolveTenantId($request, $moduleData);
@@ -236,150 +238,181 @@ class ModulesController extends Controller
 
             $module->assignedAgencies()->attach($agencies);
         }
+        // =============================
+        // PREPARE PERMISSIONS
+        // =============================
 
-        // =============================
-        // Prepare Permissions
-        // =============================
-       // =============================
-        // Prepare Permissions
-        // =============================
-        $allPermissions = [];
+        $allPermissionActions = [
+            'access',
+            'create',
+            'edit',
+            'show',
+            'delete'
+        ];
+
+        $permissionActions = [
+            1 => 'access',
+            2 => 'create',
+            3 => 'edit',
+            4 => 'show',
+            5 => 'delete',
+        ];
+
+        $selectedPermissions = [];
 
         if (!empty($moduleData['permissions'])) {
 
-            $permissionActions = [
-                1 => 'access',
-                2 => 'create',
-                3 => 'edit',
-                4 => 'show',
-                5 => 'delete',
-            ];
-
             foreach ($moduleData['permissions'] as $permId) {
-                $action = $permissionActions[$permId] ?? 'permission_' . $permId;
-                $allPermissions[] = $module->slug . '_' . $action;
+
+                $action = $permissionActions[$permId] ?? null;
+
+                if ($action) {
+                    $selectedPermissions[] = $module->slug . '_' . $action;
+                }
             }
         }
 
-        // Create permissions in Spatie
-        $permissions = collect($allPermissions)->map(function ($name) {
-            return Permission::firstOrCreate([
-                'name' => $name,
-                'guard_name' => 'sanctum'
-            ])->name;
-        })->toArray();
+        /*
+        |--------------------------------------------------------------------------
+        | CREATE PERMISSIONS
+        |--------------------------------------------------------------------------
+        */
 
-        // =============================
-        // 1. SUPER ADMIN → ALWAYS ACCESS
-        // =============================
+        $allPermissions = collect($allPermissionActions)->map(function ($action) use ($module) {
+
+            return Permission::firstOrCreate([
+                'name' => $module->slug . '_' . $action,
+                'guard_name' => 'sanctum'
+            ]);
+
+        });
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | SUPER ADMIN → ALWAYS ACCESS
+        |--------------------------------------------------------------------------
+        */
+
         $superAdminRole = Role::where('name', 'Super Admin')->first();
 
         if ($superAdminRole) {
-            $superAdminRole->syncPermissions(array_unique(array_merge(
-                $superAdminRole->permissions->pluck('name')->toArray(),
-                $permissions
-            )));
+            $superAdminRole->givePermissionTo($allPermissions);
         }
 
-        // =============================
-        // 2. LOGIN USER → ALWAYS ACCESS
-        // =============================
-        foreach ($allPermissions as $permissionName) {
-            ModulePermission::create([
-                'module_id'       => $module->id,
-                'user_id'         => $user->id,
-                'permission_name' => $permissionName,
+
+        /*
+        |--------------------------------------------------------------------------
+        | LOGIN USER → ALWAYS ACCESS
+        |--------------------------------------------------------------------------
+        */
+
+        foreach ($allPermissions as $permission) {
+
+            ModulePermission::updateOrCreate([
+                'module_id' => $module->id,
+                'user_id' => $user->id,
+                'permission_name' => $permission->name
             ]);
         }
 
-        // =============================
-        // 3. ADMIN HANDLING
-        // =============================
-        if ($moduleData['user_type'] === 'admin') {
 
-            // 👉 SPECIFIC ADMINS ONLY
-            if (!empty($moduleData['assigned_admins']) && is_array($moduleData['assigned_admins'])) {
+        /*
+        |--------------------------------------------------------------------------
+        | TENANT PERMISSIONS ONLY
+        |--------------------------------------------------------------------------
+        */
 
-                foreach ($moduleData['assigned_admins'] as $admin) {
+        if (!empty($module->tenant_id) && $user->user_type === 'agency') {
+            $tenant = Tenant::find($user->tenant_id);
+             tenancy()->initialize($tenant);
+                foreach ($allPermissions as $permission) {
+                    Permission::firstOrCreate([
+                        'name' => $permission->name,
+                        'guard_name' => 'sanctum'
+                    ]);
+                }
+             tenancy()->end();
+        }
 
-                    $adminId = is_array($admin) ? $admin['id'] : $admin;
 
-                    foreach ($allPermissions as $permissionName) {
-                        ModulePermission::create([
-                            'module_id'       => $module->id,
-                            'user_id'         => $adminId,
-                            'permission_name' => $permissionName,
-                        ]);
+        /*
+        |--------------------------------------------------------------------------
+        | USER TYPE PERMISSIONS
+        |--------------------------------------------------------------------------
+        */
+
+        if (!empty($moduleData['user_type'])) {
+
+            if ($moduleData['user_type'] === 'admin') {
+
+                if (!empty($moduleData['assigned_admins']) && is_array($moduleData['assigned_admins'])) {
+
+                    foreach ($moduleData['assigned_admins'] as $admin) {
+
+                        $adminId = is_array($admin) ? $admin['id'] : $admin;
+
+                        foreach ($permissions as $permission) {
+
+                            ModulePermission::updateOrCreate([
+                                'module_id' => $module->id,
+                                'user_id' => $adminId,
+                                'permission_name' => $permission->name
+                            ]);
+                        }
+                    }
+                }
+
+                elseif (($moduleData['assigned_admins'] ?? '') === 'all') {
+
+                    $role = Role::where('name', 'admin')->first();
+
+                    if ($role) {
+                        $role->givePermissionTo($permissions);
                     }
                 }
             }
 
-            // 👉 ALL ADMINS (ROLE BASED)
-            elseif (($moduleData['assigned_admins'] ?? '') === 'all') {
 
-                $role = Role::where('name', 'admin')->first();
+            elseif ($moduleData['user_type'] === 'agency') {
 
-                if ($role) {
-                    $role->syncPermissions(array_unique(array_merge(
-                        $role->permissions->pluck('name')->toArray(),
-                        $permissions
-                    )));
+                if (!empty($moduleData['assigned_agencies']) && is_array($moduleData['assigned_agencies'])) {
+
+                    foreach ($moduleData['assigned_agencies'] as $agency) {
+
+                        $agencyId = is_array($agency) ? $agency['id'] : $agency;
+
+                        foreach ($permissions as $permission) {
+
+                            ModulePermission::updateOrCreate([
+                                'module_id' => $module->id,
+                                'user_id' => $agencyId,
+                                'permission_name' => $permission->name
+                            ]);
+                        }
+                    }
                 }
-            }
-        }
 
-        // =============================
-        // 4. AGENCY HANDLING
-        // =============================
-        elseif ($moduleData['user_type'] === 'agency') {
+                elseif (($moduleData['assigned_agencies'] ?? '') === 'all') {
 
-            // 👉 SPECIFIC AGENCIES ONLY
-            if (!empty($moduleData['assigned_agencies']) && is_array($moduleData['assigned_agencies'])) {
+                    $role = Role::where('name', 'agency')->first();
 
-                foreach ($moduleData['assigned_agencies'] as $agency) {
-
-                    $agencyId = is_array($agency) ? $agency['id'] : $agency;
-
-                    foreach ($allPermissions as $permissionName) {
-                        ModulePermission::create([
-                            'module_id'       => $module->id,
-                            'user_id'         => $agencyId,
-                            'permission_name' => $permissionName,
-                        ]);
+                    if ($role) {
+                        $role->givePermissionTo($permissions);
                     }
                 }
             }
 
-            // 👉 ALL AGENCIES (ROLE BASED)
-            elseif (($moduleData['assigned_agencies'] ?? '') === 'all') {
 
-                $role = Role::where('name', 'agency')->first();
+            elseif ($moduleData['user_type'] === 'all') {
 
-                if ($role) {
-                    $role->syncPermissions(array_unique(array_merge(
-                        $role->permissions->pluck('name')->toArray(),
-                        $permissions
-                    )));
-                }
-            }
-        }
+                foreach (['admin','agency'] as $roleName) {
 
-        // =============================
-        // 5. ALL USERS
-        // =============================
-        elseif ($moduleData['user_type'] === 'all') {
+                    $role = Role::where('name', $roleName)->first();
 
-            $roles = ['admin', 'agency'];
-
-            foreach ($roles as $roleName) {
-
-                $role = Role::where('name', $roleName)->first();
-
-                if ($role) {
-                    $role->syncPermissions(array_unique(array_merge(
-                        $role->permissions->pluck('name')->toArray(),
-                        $permissions
-                    )));
+                    if ($role) {
+                        $role->givePermissionTo($permissions);
+                    }
                 }
             }
         }
