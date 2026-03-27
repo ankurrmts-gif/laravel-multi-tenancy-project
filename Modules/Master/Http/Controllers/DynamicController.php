@@ -21,6 +21,7 @@ class DynamicController extends Controller
     */
     private function getModule($slug)
     {
+        tenancy()->end();
         return Module::with('assignedAdmins', 'assignedAgencies', 'permissions')
             ->where('slug', $slug)
             ->firstOrFail();
@@ -177,8 +178,10 @@ class DynamicController extends Controller
     }
 
     //create 
-    public function create($slug)
+    public function create(Request $request,$slug)
     {
+        echo "<pre>"; print_r($request->user()); die();
+        tenancy()->end();
         $module = $this->getModule($slug);
 
         $response = [
