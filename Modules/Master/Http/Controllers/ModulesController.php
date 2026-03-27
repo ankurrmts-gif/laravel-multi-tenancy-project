@@ -200,7 +200,7 @@ class ModulesController extends Controller
 
         $moduleData = $request->input('module');
         $user = auth()->user();
-        //$user = User::find(1); // replace with auth()->user()
+        // $user = User::find(1);
 
         //echo "<pre>"; print_r($user); die();
 
