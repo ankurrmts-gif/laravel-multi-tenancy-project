@@ -2,7 +2,7 @@
 
 namespace Modules\Master\Http\Controllers;
 
-use App\Models\Module;
+use App\Models\Module,App\Models\ModulePermission;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -134,19 +134,46 @@ class DynamicController extends Controller
     */
     public function index(Request $request, $slug)
     {
+        $user = auth()->user();
+
+        // Get module
         $module = $this->getModule($slug);
+
+        // Get permissions
+        if ($module->created_by == $user->id) {
+
+            $module_permission = ModulePermission::where([
+                'module_id' => $module->id,
+                'user_id'   => $user->id
+            ])->get();
+
+        } else {
+
+            $module_permission = $user->roles()
+                ->with('permissions')
+                ->get()
+                ->pluck('permissions')
+                ->flatten();
+        }
+
+        // dynamic table name
         $table = Str::plural($module->slug);
 
         $query = DB::table($table);
 
-        // Search
-        if ($request->search) {
-            $query->where('name', 'like', "%{$request->search}%");
+        // Search filter
+        if ($request->filled('search')) {
+            $query->where('name', 'like', '%' . $request->search . '%');
         }
 
+        // latest records
         $data = $query->latest()->paginate(10);
 
-        return response()->json($data);
+        // attach permission in response
+        return response()->json([
+            'data' => $data,
+            'module_permission' => $module_permission
+        ]);
     }
 
     //create 
