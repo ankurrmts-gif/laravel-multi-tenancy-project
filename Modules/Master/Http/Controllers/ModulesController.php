@@ -352,7 +352,7 @@ class ModulesController extends Controller
 
                         $adminId = is_array($admin) ? $admin['id'] : $admin;
 
-                        foreach ($permissions as $permission) {
+                        foreach ($selectedPermissions as $permission) {
 
                             ModulePermission::updateOrCreate([
                                 'module_id' => $module->id,
@@ -368,7 +368,7 @@ class ModulesController extends Controller
                     $role = Role::where('name', 'admin')->first();
 
                     if ($role) {
-                        $role->givePermissionTo($permissions);
+                        $role->givePermissionTo($selectedPermissions);
                     }
                 }
             }
@@ -382,7 +382,7 @@ class ModulesController extends Controller
 
                         $agencyId = is_array($agency) ? $agency['id'] : $agency;
 
-                        foreach ($permissions as $permission) {
+                        foreach ($selectedPermissions as $permission) {
 
                             ModulePermission::updateOrCreate([
                                 'module_id' => $module->id,
@@ -398,7 +398,7 @@ class ModulesController extends Controller
                     $role = Role::where('name', 'agency')->first();
 
                     if ($role) {
-                        $role->givePermissionTo($permissions);
+                        $role->givePermissionTo($selectedPermissions);
                     }
                 }
             }
@@ -411,7 +411,7 @@ class ModulesController extends Controller
                     $role = Role::where('name', $roleName)->first();
 
                     if ($role) {
-                        $role->givePermissionTo($permissions);
+                        $role->givePermissionTo($selectedPermissions);
                     }
                 }
             }
@@ -485,54 +485,110 @@ class ModulesController extends Controller
         $module = Module::findOrFail($id);
 
         $validator = Validator::make($request->all(), [
-            'fields'                  => 'array',
+            'module.id'         => 'required|integer',
+            'module.main_model_name' => 'required|string',
+            'module.slug'       => 'required|string|unique:modules,slug,' . $id,
+            // similar to store
+            'fields'            => 'array',
         ]);
 
         if ($validator->fails()) {
-            return response()->json([
-                'success' => false,
-                'errors'  => $validator->errors()
-            ], 422);
-        } 
-        // =============================
-        // Fields
-        // =============================
-        if ($request->has('fields')) {
+            return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
+        }
 
-            foreach ($request->input('fields') as $fieldData) {
+        DB::beginTransaction();
+        try {
+            $moduleData       = $request->input('module');
+            $user = auth()->user();
 
-                $field = ModuleField::create(array_merge(
-                    $fieldData,
-                    ['module_id' => $module->id]
-                ));
+            $resolvedTenantId = $this->resolveTenantId($request, $moduleData);
+            if ($resolvedTenantId !== null) {
+                $moduleData['tenant_id'] = $resolvedTenantId;
+            }
 
-                if (!empty($fieldData['options'])) {
+            if ($module->created_by == '') {
+                $moduleData['created_by'] = $user->id; // preserve original creator if not provided
+            }
 
-                    foreach ($fieldData['options'] as $option) {
+            $module->update($moduleData);
 
-                        ModuleFieldOption::create(array_merge(
-                            $option,
-                            ['module_field_id' => $field->id]
-                        ));
+            // Update assignments
+            $module->assignedAdmins()->sync(collect($moduleData['assigned_admins'] ?? [])->pluck('id')->toArray());
+            $module->assignedAgencies()->sync(collect($moduleData['assigned_agencies'] ?? [])->pluck('id')->toArray());
+
+            // Update permissions - simplified
+            $module->permissions()->delete();
+            $allPermissions = [];
+            if (isset($moduleData['permissions'])) {
+                $permissionActions = [
+                    1 => 'access',
+                    2 => 'create',
+                    3 => 'edit',
+                    4 => 'show',
+                    5 => 'delete',
+                ];
+
+                foreach ($moduleData['permissions'] as $permId) {
+                    $action         = $permissionActions[$permId] ?? 'permission_' . $permId;
+                    $permissionName = $module->slug . '_' . $action;
+                    ModulePermission::create([
+                        'module_id'       => $module->id,
+                        'user_id'         => $user->id,
+                        'permission_name' => $permissionName,
+                    ]);
+                    $allPermissions[] = $permissionName;
+                }
+            }
+
+            // Assign permissions based on user_type
+            if (! empty($allPermissions) && ! empty($moduleData['user_type'])) {
+                $rolesToAssign = [];
+                if (in_array($moduleData['user_type'], ['all', 'admin'])) {
+                    $rolesToAssign[] = 'admin';
+                }
+                if (in_array($moduleData['user_type'], ['all', 'customer'])) {
+                    $rolesToAssign[] = 'agency';
+                }
+
+                foreach ($rolesToAssign as $roleName) {
+                    $role = Role::where('name', $roleName)->first();
+                    if ($role) {
+                        $finalPermissions = [];
+
+                        foreach ($allPermissions as $permissionName) {
+                            // ✅ Check or Create permission in Spatie table
+                            $permission = Permission::firstOrCreate([
+                                'name' => $permissionName,
+                                'guard_name' => 'sanctum' // default guard
+                            ]);
+
+                            $finalPermissions[] = $permission->name;
+                        }
+
+                        $role->givePermissionTo($finalPermissions);
                     }
                 }
             }
+
+            // Update fields - simplified, assume replace all
+            $module->fields()->delete(); // This will cascade options
+            if ($request->has('fields')) {
+                foreach ($request->input('fields') as $fieldData) {
+                    $field = ModuleField::create(array_merge($fieldData, ['module_id' => $module->id]));
+                    if (isset($fieldData['options'])) {
+                        foreach ($fieldData['options'] as $option) {
+                            ModuleFieldOption::create(array_merge($option, ['module_field_id' => $field->id]));
+                        }
+                    }
+                }
+            }
+
+            DB::commit();
+            return response()->json(['success' => true, 'message' => 'Module updated successfully']);
+        } catch (\Exception $e) {
+            DB::rollback();
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
         }
-
-        // Load relations
-        $module->load('fields.columnType');
-
-        // Generate files
-        $this->generateModuleFiles($module);
-
-        $fileService = new ModuleFileStructureService();
-        $fileService->createModuleDirectories($module->slug);
-        $fileService->createGitkeepFiles($module->slug);
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Module updated successfully'
-        ]);   
     }
 
     public function destroyWithFields($id)

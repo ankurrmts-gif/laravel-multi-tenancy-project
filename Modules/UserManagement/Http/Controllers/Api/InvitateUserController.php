@@ -34,7 +34,8 @@ class InvitateUserController extends Controller
  
         // Base validation
         $rules = [
-            'name'  => 'required|string|max:255',
+            'first_name'  => 'required|string|max:255',
+            'last_name'  => 'required|string|max:255',
             'email' => [
                 'required',
                 'email',
@@ -72,7 +73,8 @@ class InvitateUserController extends Controller
         
         // Create invitation
         $invitation = UserInvitations::create([
-            'name'       => $request->name,
+            'first_name' => $request->first_name,
+            'last_name'  => $request->last_name,
             'email'      => $request->email,
             'password'   => Hash::make(bin2hex(random_bytes(6))),
             'token'      => Str::random(64),
@@ -88,7 +90,7 @@ class InvitateUserController extends Controller
         $payload = [
             'token' => $invitation->token,
             'email' => $invitation->email,
-            'name'  => $request->name,
+            'name'  => $request->first_name.' '.$request->last_name,
         ];
  
         $encrypted = Crypt::encryptString(json_encode($payload));
@@ -100,7 +102,6 @@ class InvitateUserController extends Controller
 
         Cache::tags(['invitation_list_user_' . $user->id])->flush();
 
- 
         return response()->json([
             'message' => 'Invitation sent successfully.'
         ]);
@@ -152,7 +153,7 @@ class InvitateUserController extends Controller
         $payload = [
             'token' => $invitation->token,
             'email' => $invitation->email,
-            'name'  => $invitation->name,
+            'name'  => $invitation->first_name.'-'.$invitation->last_name,
         ];
  
         $encrypted = Crypt::encryptString(json_encode($payload));
@@ -178,7 +179,7 @@ class InvitateUserController extends Controller
         ]);
  
         try {
-             $decoded = urldecode($request->data);
+            $decoded = urldecode($request->data);
  
             $decrypted = json_decode(
                 \Crypt::decryptString($decoded),
@@ -212,9 +213,9 @@ class InvitateUserController extends Controller
  
         /* ================= ADMIN ================= */
         if ($invitation->user_type === 'admin') {
-
             $user = User::create([
-                'name' => $invitation->name,
+                'first_name' => $invitation->first_name,
+                'last_name' => $invitation->last_name,
                 'email' => $invitation->email,
                 'password' => Hash::make($request->password),
                 'user_type' => 'admin',
@@ -237,7 +238,7 @@ class InvitateUserController extends Controller
 
             $tenant = Tenant::create([
                 'id' => Str::uuid()->toString(),
-                'agency_name' => $invitation->name,
+                'agency_name' => $invitation->first_name.' '.$invitation->last_name,
                 'database' => 'tenant' . Str::random(8),
             ]);
 
@@ -246,7 +247,8 @@ class InvitateUserController extends Controller
             ]);
 
             $user = User::create([
-                'name' => $invitation->name,
+                'first_name' => $invitation->first_name,
+                'last_name' => $invitation->last_name,
                 'email' => $invitation->email,
                 'password' => Hash::make($request->password),
                 'user_type' => 'agency',
@@ -313,7 +315,8 @@ class InvitateUserController extends Controller
             tenancy()->initialize($tenant);
 
             $user = User::create([
-                'name' => $invitation->name,
+                'first_name' => $invitation->first_name,
+                'last_name' => $invitation->last_name,
                 'email' => $invitation->email,
                 'email_verified_at' => now(),
                 'password' => Hash::make($request->password),
@@ -385,7 +388,6 @@ class InvitateUserController extends Controller
 
     public function invitationList(Request $request): JsonResponse
     {
-        
         $user = $request->user();
         // $user = User::find(1);
 
@@ -400,7 +402,7 @@ class InvitateUserController extends Controller
             $sort  = $request->sort ?? 'created_at';
             $dir   = $request->dir ?? 'desc';
 
-            $query = UserInvitations::select('id', 'name', 'email', 'user_type', 'status', 'created_at')
+            $query = UserInvitations::select('id', 'first_name', 'last_name', 'email', 'user_type', 'status', 'created_at')
                 ->where('created_by', $user->id);
 
             if ($request->has('status')) {
@@ -415,7 +417,8 @@ class InvitateUserController extends Controller
 
             if ($request->has('search')) {
                 $query->where(function ($q) use ($request) {
-                    $q->where('name', 'like', '%' . $request->search . '%')
+                    $q->where('first_name', 'like', '%' . $request->search . '%')
+                    ->orWhere('last_name', 'like', '%' . $request->search . '%')
                     ->orWhere('email', 'like', '%' . $request->search . '%');
                 });
             }

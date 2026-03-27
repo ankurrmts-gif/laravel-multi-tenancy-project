@@ -24,7 +24,8 @@ class UserInvitations extends Model
     ];
  
     protected $fillable = [
-        'name',
+        'first_name',
+        'last_name',
         'email',
         'password',
         'token',
