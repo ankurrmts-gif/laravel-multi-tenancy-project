@@ -13,7 +13,7 @@ return new class extends Migration
     {
         Schema::create('modules', function (Blueprint $table) {
             $table->id();
-            $table->string('model_name');
+            $table->string('main_model_name');
             $table->string('slug')->unique();
             $table->string('menu_title');
             $table->unsignedBigInteger('parent_menu')->nullable();
