@@ -59,7 +59,8 @@ class AuthController extends Controller
     public function register(Request $request): JsonResponse
     {   
         $validator = Validator::make($request->all(), [
-            'name' => ['required', 'string', 'max:255'],
+            'first_name' => ['required', 'string'],
+            'last_name' => ['required', 'string'],
             'email' => [
                 'required',
                 'string',
@@ -78,7 +79,7 @@ class AuthController extends Controller
 
         $tenant = Tenant::create([
             'id' => Str::uuid()->toString(),
-            'agency_name' => $request->name,
+            'agency_name' => $request->first_name . ' ' . $request->last_name,
             'database' => 'tenant' . Str::random(8),
         ]);
 
@@ -87,7 +88,8 @@ class AuthController extends Controller
         ]); 
 
         $tenantUser = User::create([
-            'name' => $request->name,
+            'first_name' => $request->first_name,
+            'last_name' => $request->last_name,
             'email' => $request->email,
             'password' => Hash::make($request->password),
             'user_type' => 'agency',
@@ -549,7 +551,7 @@ class AuthController extends Controller
         | 1️⃣ CENTRAL USER LOGIN
         |--------------------------------------------------------------------------
         */
-        $centralUser = User::select('id', 'name', 'email', 'password', 'email_verified_at', 'user_type', 'failed_attempts', 'locked_until', 'google2fa_secret')->where('email', $request->email)->first();
+        $centralUser = User::select('id', 'first_name', 'last_name', 'email', 'password', 'email_verified_at', 'user_type', 'failed_attempts', 'locked_until', 'google2fa_secret')->where('email', $request->email)->first();
 
         if ($centralUser) {
 
@@ -563,7 +565,6 @@ class AuthController extends Controller
 
             // ❌ Wrong Password
             if (!Hash::check($request->password, $centralUser->password)) {
-
                 $centralUser->failed_attempts++;
 
                 if ($centralUser->failed_attempts >= 3) {
@@ -594,7 +595,7 @@ class AuthController extends Controller
             ]);
 
             // 🔐 No MFA for super_admin - Direct login
-            if ($centralUser->user_type === 'super_admin' && $centralUser->email === 'superadmin@gmail.com') {
+            if ($centralUser->user_type === 'super_admin') {
                 $tokenExpireMinutes = (int) optional(Settings::where('key','access_token_expires_in_minutes')->first())->value ?? 15;
                 $refreshExpireMinutes = (int) optional(Settings::where('key','refresh_token_expires_in_minutes')->first())->value ?? 120;
                 
@@ -1111,7 +1112,7 @@ class AuthController extends Controller
         |--------------------------------------------------------------------------
         */
 
-        $user = User::select('id', 'name', 'email', 'user_type', 'tenant_id')
+        $user = User::select('id', 'first_name', 'last_name', 'email', 'user_type', 'tenant_id')
             ->find($authUser->id);
 
         if ($authUser->user_type !== 'super_admin') {
@@ -1127,7 +1128,8 @@ class AuthController extends Controller
     public function updateProfile(Request $request)
     {
         $validator = Validator::make($request->all(), [
-            'name' => 'required|string|max:255',
+            'first_name' => 'required|string',
+            'last_name' => 'required|string',
             'agency_name' => 'nullable|string|max:255',
         ]);
  
@@ -1152,7 +1154,8 @@ class AuthController extends Controller
         }
  
         $updateData = [
-            'name' => $request->name,
+            'first_name' => $request->first_name,
+            'last_name' => $request->last_name,
         ];
  
         $user->update($updateData);
