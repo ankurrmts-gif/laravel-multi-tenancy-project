@@ -36,51 +36,45 @@ class InvitateUserController extends Controller
         $rules = [
             'first_name'  => 'required|string|max:255',
             'last_name'  => 'required|string|max:255',
+            'role_id'  => 'required',
             'email' => [
                 'required',
                 'email',
                 'max:255',
                 Rule::unique('users', 'email'),
                 Rule::unique('super_admin_invitations', 'email'),
+                Rule::unique('central_tenant_relations', 'email'),
             ],
-            'user_type' => 'required|in:admin,agency,agent',
         ];
- 
-        // Extra validation for agent
-        if ($request->user_type === 'agent') {
-            $rules['tenant_id'] = 'required|exists:tenants,id';
-        }
- 
+
         $validator = Validator::make($request->all(), $rules);
  
         if ($validator->fails()) {
             return response()->json(['errors' => $validator->errors()], 422);
         }
  
-        // Permission mapping
-        $permissionMap = [
-            'admin'  => 'admin-create',
-            'agency' => 'agency-create',
-            'agent'  => 'agent-create',
-        ];
- 
-        if (!$user->can($permissionMap[$request->user_type])) {
-            return response()->json(['message' => 'Access Denied.'], 403);
-        }
- 
         $Settings = Settings::where('key','expired_link_duration')->first();
         $expireDays = (int)$Settings->value ?? 1;
+
+        if($user->user_type === 'super_admin'){
+           $user_type = 'admin';
+        }elseif($user->user_type === 'admin'){
+            $user_type = 'agency';
+        }else{
+            $user_type = 'agent';
+        }
         
         // Create invitation
         $invitation = UserInvitations::create([
             'first_name' => $request->first_name,
             'last_name'  => $request->last_name,
             'email'      => $request->email,
+            'role_id'      => $request->role_id,
             'password'   => Hash::make(bin2hex(random_bytes(6))),
             'token'      => Str::random(64),
-            'user_type'  => $request->user_type,
+            'user_type'  => $user_type,
             'status'     => 'pending',
-            'tenant_id'  => $request->user_type === 'agent' ? $request->tenant_id : null,
+            'tenant_id'  => $user_type === 'agent' ? $request->tenant_id : null,
             'expires_at' => now()->addDays($expireDays),
             'created_by' => $user->id,
         ]);
@@ -113,24 +107,20 @@ class InvitateUserController extends Controller
         $user = User::find($user_id);
  
         $request->validate([
-            'email' => 'required|email',
-            'user_type' => 'required|in:admin,agency,agent',
+            'email' => 'required|email'
         ]);
- 
-        // Permission check
-        $permissionMap = [
-            'admin'  => 'admin-create',
-            'agency' => 'agency-create',
-            'agent'  => 'agent-create',
-        ];
- 
-        if (!$user->can($permissionMap[$request->user_type])) {
-            return response()->json(['message' => 'Access Denied.'], 403);
+
+        if($user->user_type === 'super_admin'){
+           $user_type = 'admin';
+        }elseif($user->user_type === 'admin'){
+            $user_type = 'agency';
+        }else{
+            $user_type = 'agent';
         }
  
         // 🔎 Check invitation only if expired OR rejected
         $invitation = UserInvitations::where('email', $request->email)
-            ->where('user_type', $request->user_type)
+            ->where('user_type', $user_type)
             ->whereIn('status', ['expired', 'rejected'])
             ->first();
  
@@ -222,13 +212,13 @@ class InvitateUserController extends Controller
                 'email_verified_at' => now(),
             ]);
 
-            $role = Role::firstOrCreate([
-                'name' => 'admin',
-                'guard_name' => 'sanctum'
-            ]);
+            $role = Role::find($invitation->role_id);
 
-            $permissions = $this->getPermissionsForRole('admin');
-            $role->syncPermissions($permissions);
+             if (!$role) {
+                return response()->json([
+                    'message' => 'Role not found for this invitation.'
+                ], 404);
+            }
 
             $user->assignRole($role);
         }
@@ -256,41 +246,28 @@ class InvitateUserController extends Controller
                 'tenant_id' => $tenant->id,
             ]);
 
-            $role = Role::firstOrCreate([
-                'name' => 'agency',
-                'guard_name' => 'sanctum'
-            ]);
+            $role = Role::find($invitation->role_id);
 
-            $permissions = $this->getPermissionsForRole('agency');
-            $role->syncPermissions($permissions);
+            if (!$role) {
+                return response()->json([
+                    'message' => 'Role not found for this invitation.'
+                ], 404);
+            }
 
             $user->assignRole($role);
 
             tenancy()->initialize($tenant);
             $allPermissions = collect([
-                'agent-create',
-                'agent-edit',
-                'agent-show',
-                'agent-delete',
+                'user-create',
+                'user-edit',
+                'user-show',
+                'user-delete',
             ])->map(function ($permission) {
                 return Permission::firstOrCreate([
                     'name' => $permission,
                     'guard_name' => 'sanctum'
                 ]);
             });
-
-            /** -------------------------------------------------
-             * CREATE OR GET SUPER ADMIN ROLE
-             * -------------------------------------------------*/
-            $superAdminRole = Role::firstOrCreate([
-                'name' => 'agent',
-                'guard_name' => 'sanctum',
-            ]);
-
-            /** -------------------------------------------------
-             * GIVE ALL PERMISSIONS TO SUPER ADMIN
-             * -------------------------------------------------*/
-            $superAdminRole->syncPermissions($allPermissions);
 
             tenancy()->end();
             
@@ -322,26 +299,15 @@ class InvitateUserController extends Controller
                 'password' => Hash::make($request->password),
             ]);
 
-            // $role = Role::firstOrCreate([
-            //     'name' => 'agent',
-            //     'guard_name' => 'sanctum'
-            // ]);
+            $role = Role::find($invitation->role_id);
 
-            // $permissions = collect([
-            //     'agent-access',
-            //     'agent-create',
-            //     'agent-edit',
-            //     'agent-show',
-            //     'agent-delete',
-            // ])->map(function ($permission) {
-            //     return Permission::firstOrCreate([
-            //         'name' => $permission,
-            //         'guard_name' => 'sanctum'
-            //     ]);
-            // });
+             if (!$role) {
+                return response()->json([
+                    'message' => 'Role not found for this invitation.'
+                ], 404);
+            }
 
-            // $role->syncPermissions($permissions);
-            // $user->assignRole($role);
+            $user->assignRole($role);
 
             tenancy()->end();
             Cache::tags(['agents_list'])->flush();

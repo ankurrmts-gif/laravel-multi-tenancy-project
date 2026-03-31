@@ -30,6 +30,7 @@ class UserInvitations extends Model
         'password',
         'token',
         'user_type',
+        'role_id',
         'tenant_id',
         'status',
         'expires_at',
@@ -37,6 +38,22 @@ class UserInvitations extends Model
         'created_at',
         'updated_at',
     ];
+
+    /**
+     * Get the role associated with this invitation
+     */
+    public function role()
+    {
+        return $this->belongsTo(\Spatie\Permission\Models\Role::class);
+    }
+
+    /**
+     * Get the user who created this invitation
+     */
+    public function creator()
+    {
+        return $this->belongsTo(User::class, 'created_by');
+    }
  
     protected function serializeDate(DateTimeInterface $date)
     {
