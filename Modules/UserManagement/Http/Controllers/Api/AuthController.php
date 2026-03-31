@@ -1124,7 +1124,7 @@ class AuthController extends Controller
         ]);
     }
 
-   public function updateProfile(Request $request)
+    public function updateProfile(Request $request)
     {
         $validator = Validator::make($request->all(), [
             'name' => 'required|string|max:255',
@@ -1233,4 +1233,5 @@ class AuthController extends Controller
         ], 200);
     }
 
+  
 }

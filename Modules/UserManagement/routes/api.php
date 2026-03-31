@@ -39,6 +39,7 @@ Route::middleware([\App\Http\Middleware\AuthenticateSanctumMultiTenant::class])-
     
 // Public API routes
 Route::post('/verify-Mfa', [AuthController::class, 'verifyMfa']);
+Route::post('/contact-us', [CommonController::class, 'contactUs']);
 
 Route::middleware(['verify.recaptcha', 'throttle:auth-limit'])->group(function () {
     Route::post('/register', [AuthController::class, 'register']);
@@ -83,6 +84,8 @@ Route::middleware(\App\Http\Middleware\AuthenticateSanctumMultiTenant::class)->g
     Route::delete('/user/{id}', [UserController::class, 'deleteUser']);
     Route::get('get-agency', [UserController::class, 'getAgency']);
     Route::get('get-admin', [UserController::class, 'getAdmin']);
+    Route::post('reset-mfa', [UserController::class, 'resetMfa']);
+    Route::get('get-all-users', [UserController::class, 'getAllUsers']);
 
     Route::get('get-all-settings', [CommonController::class, 'getAllSettings']);
     Route::get('get-setting-details', [CommonController::class, 'getSettingDetails']);

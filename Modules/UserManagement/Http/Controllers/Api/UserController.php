@@ -406,4 +406,107 @@ class UserController extends Controller
             'admin' => $admin
         ],200);
     }
+
+    public function resetMfa(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'user_id' => 'required|exists:users,id',
+        ]);         
+
+        if ($validator->fails()) {
+            return response()->json([
+                'status' => false,
+                'message' => 'Validation failed.',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        $user = User::find($request->user_id);
+
+        if (!$user) {
+            return response()->json([
+                'status' => false,
+                'message' => 'User not found.'
+            ], 404);
+        }
+
+        // Reset MFA for the user
+        $user->google2fa_secret = NULL;
+        $user->save();
+
+        return response()->json([
+            'status' => true,
+            'message' => 'MFA reset successfully.'
+        ]);
+    }
+
+    public function getAllUsers(Request $request)
+    {
+        $validator = Validator::make($request->all(), [ 
+            'type'    => 'required|in:admin,customer,users',
+            'search'    => 'nullable|string|max:255',
+            'limit'     => 'nullable|integer',
+            'sort'      => 'nullable|string',
+            'dir'       => 'nullable|in:asc,desc',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['errors' => $validator->errors()], 422);
+        }
+
+        $cacheKey = 'all_users_list_' . md5($request->fullUrl());
+        $users = Cache::tags(['all_users_list'])->rememberForever($cacheKey, function () use ($request) {
+            $limit = $request->limit ?? 10;
+            $sort  = $request->sort ?? 'created_at';
+            $dir   = $request->dir ?? 'desc';
+
+            /*
+            |--------------------------------------------------------------------------
+            | If tenant_id exists → fetch tenant agents
+            |--------------------------------------------------------------------------
+            */
+
+            $Auth = $request->user();
+            $users = User::select('id', 'name', 'email', 'user_type', 'created_at')->where('id', '!=', $Auth->id);
+            
+            $users = $users->whereHas('roles', function ($q) use ($request) {
+                $q->where('user_type','!=','super_admin');
+
+                if ($request->user_type) {
+                    $q->where('name',$request->user_type);
+                }
+            });
+
+            if ($request->filled('search')) {
+                $search = $request->search;
+
+                $users->where(function ($q) use ($search) {
+                    $q->where('name','like',"%{$search}%")
+                    ->orWhere('email','like',"%{$search}%");
+                });
+
+            }
+
+            if($request->type != 'users'){
+                $users->where('user_type',$request->type);
+            }else{
+                $Tenant = Tenant::select('id')->get();
+                $allusers = [];
+                foreach($Tenant as $tenant){
+                    tenancy()->initialize($tenant->id);
+                    $tenantUsers = User::select('id', 'name', 'email', 'user_type', 'created_at')->get();
+                    $allusers = array_merge($allusers, $tenantUsers->toArray());
+                    tenancy()->end();
+                }
+                return collect($allusers)->paginate($limit);
+            }
+
+            return $users->orderBy($sort,$dir)->paginate($limit);
+        });
+
+        return response()->json([
+            'status' => true,
+            'users'  => $users
+        ],200);
+    }
 }

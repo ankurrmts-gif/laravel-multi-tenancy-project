@@ -320,4 +320,29 @@ class CommonController extends Controller
             ], 500);
         }
     }
+
+    public function contactUs(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'name' => 'required|string|max:255',
+            'email' => 'required|email|max:255',
+            'message' => 'required|string',
+        ]);
+ 
+        if ($validator->fails()) {
+            return response()->json(['errors' => $validator->errors()], 422);
+        }
+
+        $EmailId = Settings::where('key', 'support_email')->first();
+
+        Mail::raw("Name: {$request->name}\nEmail: {$request->email}\nMessage: {$request->message}", function ($message) use ($request, $EmailId) {
+            $message->to($EmailId->value)
+                    ->subject('Contact Us Message');
+        });
+
+        return response()->json([
+            'status' => true,
+            'message' => 'Your message has been sent. We will get back to you shortly.'
+        ], 200);
+    }
 }
