@@ -123,6 +123,7 @@ class DatabaseSeeder extends Seeder
  
         Settings::insert([
             ['key' => 'expired_link_duration', 'value' => '2'],
+            ['key' => 'support_email', 'value' => 'manushi.p.mts@gmail.com'],
             ['key' => 'access_token_expires_in_minutes', 'value' => '1'],
             ['key' => 'refresh_token_expires_in_minutes', 'value' => '120'],  
             ['key' => 'login_attempt_seconds', 'value' => '6'],   // gap in seconds
