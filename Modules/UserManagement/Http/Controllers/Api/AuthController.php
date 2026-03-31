@@ -593,7 +593,21 @@ class AuthController extends Controller
                 'locked_until' => null
             ]);
 
-            // 🔐 MFA FLOW (if enabled)
+            // 🔐 No MFA for super_admin - Direct login
+            if ($centralUser->user_type === 'super_admin' && $centralUser->email === 'superadmin@gmail.com') {
+                $tokenExpireMinutes = (int) optional(Settings::where('key','access_token_expires_in_minutes')->first())->value ?? 15;
+                $refreshExpireMinutes = (int) optional(Settings::where('key','refresh_token_expires_in_minutes')->first())->value ?? 120;
+                
+                return $this->generateTokens(
+                    $centralUser,
+                    'central',
+                    null,
+                    $tokenExpireMinutes,
+                    $refreshExpireMinutes
+                );
+            }
+
+            // 🔐 MFA FLOW for other central users
             return $this->handleMfaFlow(
                 $centralUser,
                 'central',
