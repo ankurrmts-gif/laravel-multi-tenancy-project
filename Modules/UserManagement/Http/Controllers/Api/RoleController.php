@@ -55,10 +55,16 @@ class RoleController extends Controller
 
             $roles = Cache::tags(['roles_list'])->rememberForever($cacheKey, function () use ($request) {
                 if ($request->select == true) {
-                    return Role::select('id', 'name')
-                        ->where('id', '!=', 1)
-                        ->orderBy('name')
-                        ->get();
+                    if ($request->filled('tenant_id')) {
+                        return Role::select('id', 'name')
+                            ->orderBy('name')
+                            ->get();
+                    } else {
+                        return Role::select('id', 'name')
+                            ->where('id', '!=', 1)
+                            ->orderBy('name')
+                            ->get();
+                    }
                 }
                     
                 $limit = $request->limit ?? 10;

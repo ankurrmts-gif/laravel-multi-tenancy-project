@@ -18,8 +18,6 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
-        //$this->call(ColumnTypesSeeder::class);
-
          /** -------------------------------------------------
          * ALWAYS USE CENTRAL DB
          * -------------------------------------------------*/
@@ -29,12 +27,6 @@ class DatabaseSeeder extends Seeder
          * GET ALL PERMISSIONS FROM DB
          * (No static permissions now)
          * -------------------------------------------------*/
-        // $allPermissions = Permission::where('guard_name', 'sanctum')->get();
- 
-        // if ($allPermissions->count() === 0) {
-        //     $this->command->warn('⚠ No permissions found in DB. Seeder stopped.');
-        //     return;
-        // }
  
         $allPermissions = collect([
             'role-access',
@@ -48,46 +40,18 @@ class DatabaseSeeder extends Seeder
             'permission-show',
             'permission-delete',
             'settings-access',
-            // 'settings-create',
             'settings-edit',
-            // 'settings-show',
-            // 'settings-delete',
             'invitation-access',
-            'admin-access',
-            'admin-create',
-            'admin-edit',
-            'admin-show',
-            'admin-delete',
-            'agency-access',
-            'agency-create',
-            'agency-edit',
-            'agency-show',
-            'agency-delete',
-            'agent-access',
-            'agent-create',
-            'agent-edit',
-            'agent-show',
-            'agent-delete',
-            'module-access',
-            'module-create',
-            'module-edit',
-            'module-show',
-            'module-delete',
-            'tenant-role-access',
-            'tenant-role-create',
-            'tenant-role-edit',
-            'tenant-role-show',
-            'tenant-role-delete',
-            'tenant-permission-access',
-            'tenant-permission-create',
-            'tenant-permission-edit',
-            'tenant-permission-show',
-            'tenant-permission-delete',
-            'tenant-module-access', 
-            'tenant-module-create', 
-            'tenant-module-edit', 
-            'tenant-module-show', 
-            'tenant-module-delete'
+            'master-module-access',
+            'master-module-create',
+            'master-module-edit',
+            'master-module-show',
+            'master-module-delete',
+            'user-access',
+            'user-create',
+            'user-edit',
+            'user-show',
+            'user-delete'
         ])->map(function ($permission) {
             return Permission::firstOrCreate([
                 'name' => $permission,
@@ -114,7 +78,8 @@ class DatabaseSeeder extends Seeder
         $superAdmin = User::firstOrCreate(
             ['email' => 'superadmin@gmail.com'],
             [
-                'name' => 'Super Admin',
+                'first_name' => 'Super',
+                'last_name' => 'Admin',
                 'password' => Hash::make('Pa$$w0rd!'),
                 'email_verified_at' => now(),
                 'user_type' => 'super_admin',
@@ -129,6 +94,11 @@ class DatabaseSeeder extends Seeder
             ['key' => 'login_attempt_seconds', 'value' => '6'],   // gap in seconds
             ['key' => 'login_attempt_minute', 'value' => '5'],     // per minute
             ['key' => 'login_attempt_hour', 'value' => '30'],      // per hour
+            ['key' => 'favicon_icon', 'value' => 'uploads/settings/1774937399_69cb65370c2a6.jpeg'],
+            ['key' => 'mini_logo', 'value' => ''],
+            ['key' => 'logo', 'value' => ''],
+            ['key' => 'default_logo_dark', 'value' => ''],
+            ['key' => 'mini_logo_dark', 'value' => ''],
         ]);
  
         /** -------------------------------------------------

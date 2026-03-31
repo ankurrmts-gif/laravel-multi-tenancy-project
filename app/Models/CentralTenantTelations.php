@@ -7,7 +7,9 @@ use Illuminate\Database\Eloquent\Model;
 
 class CentralTenantTelations extends Model
 {   
-     use HasFactory;
+    use HasFactory;
+
+    protected $connection = 'mysql';
 
     // Ensure this model uses the central database and the correct table name
     protected $table = 'central_tenant_relations';

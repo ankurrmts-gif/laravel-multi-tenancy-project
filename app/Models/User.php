@@ -41,8 +41,7 @@ class User extends Authenticatable implements MustVerifyEmail
      */
     protected $hidden = [
         'password',
-        'remember_token',
-        'google2fa_secret',
+        'remember_token'
     ];
 
     protected $casts = [

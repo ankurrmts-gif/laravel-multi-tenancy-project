@@ -84,7 +84,8 @@ class InvitateUserController extends Controller
         $payload = [
             'token' => $invitation->token,
             'email' => $invitation->email,
-            'name'  => $request->first_name.' '.$request->last_name,
+            'first_name'  => $request->first_name,
+            'last_name'  => $request->last_name
         ];
  
         $encrypted = Crypt::encryptString(json_encode($payload));
@@ -258,10 +259,11 @@ class InvitateUserController extends Controller
 
             tenancy()->initialize($tenant);
             $allPermissions = collect([
+                'user-access',
                 'user-create',
                 'user-edit',
                 'user-show',
-                'user-delete',
+                'user-delete',  
             ])->map(function ($permission) {
                 return Permission::firstOrCreate([
                     'name' => $permission,

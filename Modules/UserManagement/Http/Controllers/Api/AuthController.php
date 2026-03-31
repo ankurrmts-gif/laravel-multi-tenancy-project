@@ -1085,7 +1085,6 @@ class AuthController extends Controller
         |--------------------------------------------------------------------------
         */
         if ($relation) {
-
             $tenant = Tenant::find($relation->tenant_id);
 
             if (!$tenant) {
@@ -1097,6 +1096,7 @@ class AuthController extends Controller
             tenancy()->initialize($tenant);
 
             $tenantUser = User::where('email', $authUser->email)->first();
+            $tenantUser->load('roles.permissions');
 
             // tenancy()->end();
 

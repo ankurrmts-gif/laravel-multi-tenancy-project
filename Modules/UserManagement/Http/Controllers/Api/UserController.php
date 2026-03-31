@@ -42,66 +42,74 @@ class UserController extends Controller
         }
 
         // Permission mapping
-        $permissionMap = [
-            'admin'  => 'admin-access',
-            'agency' => 'agency-access',
-        ];
+        // $permissionMap = [
+        //     'admin'  => 'admin-access',
+        //     'agency' => 'agency-access',
+        // ];
 
-        if ($request->user_type && isset($permissionMap[$request->user_type])) {
-            if (!$request->user()->can($permissionMap[$request->user_type])) {
-                return response()->json(['message' => 'Access Denied.'], 403);
-            }
-        }
-
+        // if ($request->user_type && isset($permissionMap[$request->user_type])) {
+        //     if (!$request->user()->can($permissionMap[$request->user_type])) {
+        //         return response()->json(['message' => 'Access Denied.'], 403);
+        //     }
+        // }
         $cacheKey = 'users_list_' . md5($request->fullUrl());
         $users = Cache::tags(['users_list'])->rememberForever($cacheKey, function () use ($request) {
             $limit = $request->limit ?? 10;
             $sort  = $request->sort ?? 'created_at';
             $dir   = $request->dir ?? 'desc';
 
+            $Auth = $request->user();
+
+            $tenant_id = CentralTenantTelations::on('mysql')
+                ->where('email', $Auth->email)
+                ->value('tenant_id');
             /*
             |--------------------------------------------------------------------------
             | If tenant_id exists → fetch tenant agents
             |--------------------------------------------------------------------------
             */
 
-            if ($request->filled('tenant_id')) {
-                if (!$request->user()->can('agent-access')) {
-                    return response()->json(['message' => 'Access Denied.'], 403);
-                }
+            if ($request->filled('tenant_id') || !empty($tenant_id)){
+                // if (!$request->user()->can('agent-access')) {
+                //     return response()->json(['message' => 'Access Denied.'], 403);
+                // }
+                $tenant = Tenant::find($request->tenant_id ?? $tenant_id);
 
-                $tenant = Tenant::find($request->tenant_id);
+                // echo '<pre>'; print_r($tenant); echo '</pre>'; die();
 
                 if (!$tenant) {
                     return response()->json(['message' => 'Agency not found.'], 404);
                 }
 
-                tenancy()->initialize($tenant);
+                tenancy()->initialize($tenant->id);
 
-                $users = User::select('id', 'name', 'email', 'created_at');
+
+                $users = User::select('id', 'first_name', 'last_name', 'email', 'google2fa_secret', 'created_at');
+
+                //echo '<pre>'; print_r($users->get()); echo '</pre>'; die();
 
                 if ($request->filled('search')) {
                     $search = $request->search;
 
                     $users->where(function ($q) use ($search) {
-                        $q->where('name','like',"%{$search}%")
+                        $q->where('first_name','like',"%{$search}%")
+                        ->orWhere('last_name','like',"%{$search}%")
                         ->orWhere('email','like',"%{$search}%");
                     });
                 }
 
+                //tenancy()->end();
+                
                 return $users->orderBy($sort,$dir)->paginate($limit);
-
-                // tenancy()->end();
             }
-
+        
             /*
             |--------------------------------------------------------------------------
             | Central Users (Admin / Agency)
             |--------------------------------------------------------------------------
             */
 
-            $Auth = $request->user();
-            $users = User::select('id', 'name', 'email', 'user_type', 'created_at')->where('id', '!=', $Auth->id);
+            $users = User::select('id', 'first_name', 'last_name', 'email', 'user_type', 'google2fa_secret', 'created_at')->where('id', '!=', $Auth->id);
             
             $users = $users->whereHas('roles', function ($q) use ($request) {
                 $q->where('user_type','!=','super_admin');
@@ -115,10 +123,10 @@ class UserController extends Controller
                 $search = $request->search;
 
                 $users->where(function ($q) use ($search) {
-                    $q->where('name','like',"%{$search}%")
+                    $q->where('first_name','like',"%{$search}%")
+                    ->orWhere('last_name','like',"%{$search}%")
                     ->orWhere('email','like',"%{$search}%");
                 });
-
             }
 
             return $users->orderBy($sort,$dir)->paginate($limit);
@@ -143,9 +151,9 @@ class UserController extends Controller
         }
  
         if($request->filled('tenant_id')){
-            if (!$request->user()->can('agent-show')) {
-                return response()->json(['message' => 'Access Denied.'], 403);
-            }
+            // if (!$request->user()->can('agent-show')) {
+            //     return response()->json(['message' => 'Access Denied.'], 403);
+            // }
             $tenant = Tenant::find($request->tenant_id);
  
             if (!$tenant) {
@@ -164,17 +172,17 @@ class UserController extends Controller
 
             // tenancy()->end();
         } else {
-            $user = User::select('id', 'name', 'email', 'email_verified_at', 'user_type', 'tenant_id', 'created_at')->find($request->id);
+            $user = User::select('id', 'first_name', 'last_name', 'email', 'email_verified_at', 'user_type', 'tenant_id', 'created_at')->find($request->id);
  
-            if($request->user_type == 'admin'){
-                $permissionName = 'admin-show';
-            } else {
-                $permissionName = 'agency-show';
-            }
+            // if($request->user_type == 'admin'){
+            //     $permissionName = 'admin-show';
+            // } else {
+            //     $permissionName = 'agency-show';
+            // }
  
-            if (!$request->user()->can($permissionName)) {
-                return response()->json(['message' => 'Access Denied.'], 403);
-            }
+            // if (!$request->user()->can($permissionName)) {
+            //     return response()->json(['message' => 'Access Denied.'], 403);
+            // }
        
             // $user->load('roles.permissions','tenant');
             // $user->load('roles','tenant');
@@ -189,7 +197,8 @@ class UserController extends Controller
     {
         $validator = Validator::make($request->all(), [
             'id'    => 'required|integer|exists:users,id',
-            'name'  => 'nullable|string|max:255',
+            'first_name'  => 'nullable|string',
+            'last_name'  => 'nullable|string',
             'email' => 'nullable|email|max:255',
             'tenant_id' => 'nullable|string|exists:tenants,id',
         ]);
@@ -216,7 +225,8 @@ class UserController extends Controller
             }
  
             $user->update([
-                'name'  => $request->name ?? $user->name,
+                'first_name'  => $request->first_name ?? $user->first_name,
+                'last_name'  => $request->last_name ?? $user->last_name,
                 'email' => $request->email ?? $user->email,
             ]);
  
@@ -244,7 +254,8 @@ class UserController extends Controller
             }
  
             $user->update([
-                'name'  => $request->name ?? $user->name,
+                'first_name'  => $request->first_name ?? $user->first_name,
+                'last_name'  => $request->last_name ?? $user->last_name,
                 'email' => $request->email ?? $user->email,
             ]);
  
@@ -400,7 +411,7 @@ class UserController extends Controller
 
     public function getAdmin(Request $request)
     {
-        $admin = User::select('id', 'name')->where('user_type','admin')->get();
+        $admin = User::select('id', 'first_name', 'last_name')->where('user_type','admin')->get();
  
         return response()->json([
             'admin' => $admin
@@ -411,8 +422,8 @@ class UserController extends Controller
     {
         $validator = Validator::make($request->all(), [
             'user_id' => 'required|exists:users,id',
-        ]);         
-
+        ]);        
+ 
         if ($validator->fails()) {
             return response()->json([
                 'status' => false,
@@ -420,20 +431,30 @@ class UserController extends Controller
                 'errors' => $validator->errors()
             ], 422);
         }
-
+ 
+        if($request->filled('tenant_id')){
+            $tenant = Tenant::find($request->tenant_id);
+ 
+            if (!$tenant) {
+                return response()->json(['message' => 'Tenant not found.'], 404);
+            }
+ 
+            tenancy()->initialize($tenant);
+ 
+        }
         $user = User::find($request->user_id);
-
+ 
         if (!$user) {
             return response()->json([
                 'status' => false,
                 'message' => 'User not found.'
             ], 404);
         }
-
+ 
         // Reset MFA for the user
         $user->google2fa_secret = NULL;
         $user->save();
-
+ 
         return response()->json([
             'status' => true,
             'message' => 'MFA reset successfully.'
@@ -467,7 +488,7 @@ class UserController extends Controller
             */
 
             $Auth = $request->user();
-            $users = User::select('id', 'name', 'email', 'user_type', 'created_at')->where('id', '!=', $Auth->id);
+            $users = User::select('id', 'first_name', 'last_name', 'email', 'user_type', 'created_at')->where('id', '!=', $Auth->id);
             
             $users = $users->whereHas('roles', function ($q) use ($request) {
                 $q->where('user_type','!=','super_admin');
@@ -481,7 +502,8 @@ class UserController extends Controller
                 $search = $request->search;
 
                 $users->where(function ($q) use ($search) {
-                    $q->where('name','like',"%{$search}%")
+                    $q->where('first_name','like',"%{$search}%")
+                    ->orWhere('last_name','like',"%{$search}%")
                     ->orWhere('email','like',"%{$search}%");
                 });
 
@@ -494,7 +516,7 @@ class UserController extends Controller
                 $allusers = [];
                 foreach($Tenant as $tenant){
                     tenancy()->initialize($tenant->id);
-                    $tenantUsers = User::select('id', 'name', 'email', 'user_type', 'created_at')->get();
+                    $tenantUsers = User::select('id', 'first_name', 'last_name', 'email', 'user_type', 'created_at')->get();
                     $allusers = array_merge($allusers, $tenantUsers->toArray());
                     tenancy()->end();
                 }

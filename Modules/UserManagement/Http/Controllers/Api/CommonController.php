@@ -132,7 +132,7 @@ class CommonController extends Controller
             $value = $settingData['value'];
 
             // 🔥 Handle Base64 Image Upload (logo & favicon)
-            if (in_array($key, ['logo', 'favicon_icon'])) {
+            if (in_array($key, ['logo', 'favicon_icon', 'mini_logo', 'default_logo_dark', 'mini_logo_dark'])) {
                 $base64 = $request->input("settings.$index.value");
 
                 if ($base64) {
@@ -148,7 +148,7 @@ class CommonController extends Controller
                         $extension = strtolower($type[1]); // png, jpg, jpeg, svg, ico
 
                         // 👉 Allowed extensions
-                        if (!in_array($extension, ['jpg', 'jpeg', 'png', 'gif', 'webp', 'ico'])) {
+                        if (!in_array($extension, ['jpg', 'jpeg', 'png', 'gif', 'webp', 'ico', 'svg'])) {
                             throw new \Exception('Invalid image type');
                         }
 
