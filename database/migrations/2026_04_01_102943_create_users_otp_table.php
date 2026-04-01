@@ -15,7 +15,7 @@ return new class extends Migration
             $table->id();
             $table->unsignedBigInteger('user_id');
             $table->string('user_type'); // central / tenant
-            $table->string('tenant_id');
+            $table->string('tenant_id')->nullable(); // Only for tenant user
             $table->string('otp');
             $table->timestamp('expires_at');
             $table->timestamps();

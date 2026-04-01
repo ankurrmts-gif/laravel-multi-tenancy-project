@@ -778,11 +778,8 @@ class AuthController extends Controller
                 'expires_at'=> now()->addMinutes(intval($expired->value)) // ⏱ expiry
             ]);
 
-            // 📧 Send Mail
-            \Mail::raw("Your OTP is: $otp", function ($message) use ($user) {
-                $message->to($user->email)
-                        ->subject('Your Login OTP');
-            });
+            Mail::to($user->email)
+            ->send(new \App\Mail\UserOtpVerifyMail($user, $otp, $expired->value));
 
             return response()->json([
                 'type' => 'email_otp',
@@ -1001,10 +998,9 @@ class AuthController extends Controller
         | SEND EMAIL
         |---------------------------------------------------------------
         */
-        \Mail::raw("Your OTP is: $otp", function ($message) use ($user) {
-            $message->to($user->email)
-                    ->subject('Your OTP');
-        });
+
+        Mail::to($user->email)
+            ->send(new \App\Mail\UserOtpVerifyMail($user, $otp, $expired->value));
 
         return response()->json([
             'message' => 'OTP resent successfully'
