@@ -71,6 +71,7 @@ class ModulesController extends Controller
                     'menu_title'  => $module->menu_title,
                     'slug'        => $module->slug,
                     'icon'        => $module->icon,
+                    'order_number' => $module->order_number,
                     'parent_menu' => $module->parent_menu,
                     'children'    => [],
                 ];
