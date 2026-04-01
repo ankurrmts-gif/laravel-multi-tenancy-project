@@ -100,7 +100,7 @@ class UserController extends Controller
 
                 //tenancy()->end();
                 
-                return $users->orderBy($sort,$dir)->paginate($limit);
+                return $users->where('created_by', $Auth->id)->orderBy($sort,$dir)->paginate($limit);
             }
         
             /*
@@ -118,6 +118,10 @@ class UserController extends Controller
                     $q->where('name',$request->user_type);
                 }
             });
+
+            if($request->user_type != 'super_admin'){
+                $users->where('created_by',$Auth->id);
+            }
 
             if ($request->filled('search')) {
                 $search = $request->search;

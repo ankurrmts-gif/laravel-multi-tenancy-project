@@ -208,6 +208,7 @@ class InvitateUserController extends Controller
                 'first_name' => $invitation->first_name,
                 'last_name' => $invitation->last_name,
                 'email' => $invitation->email,
+                'created_by' => $invitation->created_by,
                 'password' => Hash::make($request->password),
                 'user_type' => 'admin',
                 'email_verified_at' => now(),
@@ -241,6 +242,7 @@ class InvitateUserController extends Controller
                 'first_name' => $invitation->first_name,
                 'last_name' => $invitation->last_name,
                 'email' => $invitation->email,
+                'created_by' => $invitation->created_by,
                 'password' => Hash::make($request->password),
                 'user_type' => 'agency',
                 'email_verified_at' => now(),
@@ -297,6 +299,7 @@ class InvitateUserController extends Controller
                 'first_name' => $invitation->first_name,
                 'last_name' => $invitation->last_name,
                 'email' => $invitation->email,
+                'created_by' => $invitation->created_by,
                 'email_verified_at' => now(),
                 'password' => Hash::make($request->password),
             ]);
