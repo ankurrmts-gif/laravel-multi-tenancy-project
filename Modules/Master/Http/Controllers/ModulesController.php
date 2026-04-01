@@ -365,10 +365,17 @@ class ModulesController extends Controller
 
                 elseif (($moduleData['assigned_admins'] ?? '') === 'all') {
 
-                    $role = Role::where('name', 'admin')->first();
+                    $adminTypeUser = User::where('user_type', 'admin')->pluck('id')->toArray();
 
-                    if ($role) {
-                        $role->givePermissionTo($selectedPermissions);
+                    foreach ($adminTypeUser as $adminId) {
+                        $user = User::find($adminId);
+                        $roles = $user->roles;
+
+                        foreach ($roles as $role) {
+                            if ($role) {
+                                $role->givePermissionTo($selectedPermissions);
+                            }
+                        }
                     }
                 }
             }
@@ -395,23 +402,35 @@ class ModulesController extends Controller
 
                 elseif (($moduleData['assigned_agencies'] ?? '') === 'all') {
 
-                    $role = Role::where('name', 'agency')->first();
+                    $agencyTypeUser = User::where('user_type', 'agency')->pluck('id')->toArray();
 
-                    if ($role) {
-                        $role->givePermissionTo($selectedPermissions);
+                    foreach ($agencyTypeUser as $agencyId) {
+                        $user = User::find($agencyId);
+                        $roles = $user->roles;
+
+                        foreach ($roles as $role) {
+                            if ($role) {
+                                $role->givePermissionTo($selectedPermissions);
+                            }
+                        }
                     }
+                    
                 }
             }
 
 
             elseif ($moduleData['user_type'] === 'all') {
 
-                foreach (['admin','agency'] as $roleName) {
+                $allTypeUser = User::where('user_type', 'agency')->orWhere('user_type', 'admin')->pluck('id')->toArray();
 
-                    $role = Role::where('name', $roleName)->first();
+                foreach ($allTypeUser as $allId) {
+                    $user = User::find($allId);
+                    $roles = $user->roles;
 
-                    if ($role) {
-                        $role->givePermissionTo($selectedPermissions);
+                    foreach ($roles as $role) {
+                        if ($role) {
+                            $role->givePermissionTo($selectedPermissions);
+                        }
                     }
                 }
             }
