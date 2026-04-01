@@ -84,7 +84,7 @@ class UserController extends Controller
                 tenancy()->initialize($tenant->id);
 
 
-                $users = User::select('id', 'first_name', 'last_name', 'email', 'google2fa_secret', 'created_at');
+                $users = User::select('id', 'first_name', 'last_name', 'email', 'created_by','google2fa_secret', 'created_at');
 
                 //echo '<pre>'; print_r($users->get()); echo '</pre>'; die();
 
@@ -109,7 +109,7 @@ class UserController extends Controller
             |--------------------------------------------------------------------------
             */
 
-            $users = User::select('id', 'first_name', 'last_name', 'email', 'user_type', 'google2fa_secret', 'created_at')->where('id', '!=', $Auth->id);
+            $users = User::select('id', 'first_name', 'last_name', 'email', 'created_by', 'user_type', 'google2fa_secret', 'created_at')->where('id', '!=', $Auth->id);
             
             $users = $users->whereHas('roles', function ($q) use ($request) {
                 $q->where('user_type','!=','super_admin');
