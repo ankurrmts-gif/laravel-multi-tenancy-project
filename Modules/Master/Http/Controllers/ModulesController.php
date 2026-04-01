@@ -307,14 +307,14 @@ class ModulesController extends Controller
         |--------------------------------------------------------------------------
         */
 
-        foreach ($allPermissions as $permission) {
+        // foreach ($allPermissions as $permission) {
 
-            ModulePermission::updateOrCreate([
-                'module_id' => $module->id,
-                'user_id' => $user->id,
-                'permission_name' => $permission->name
-            ]);
-        }
+        //     ModulePermission::updateOrCreate([
+        //         'module_id' => $module->id,
+        //         'user_id' => $user->id,
+        //         'permission_name' => $permission->name
+        //     ]);
+        // }
 
 
         /*
