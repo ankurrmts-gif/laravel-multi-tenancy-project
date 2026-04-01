@@ -537,6 +537,12 @@ class AuthController extends Controller
 
     public function login(Request $request): JsonResponse
     {
+        
+        Cache::tags(['roles_list'])->flush();
+        Cache::tags(['permissions_list'])->flush();
+        Cache::tags(['agency_list'])->flush();
+        Cache::tags(['users_list'])->flush();
+        Cache::tags(['agents_list'])->flush();
         $request->validate([
             'email' => 'required|email',
             'password' => 'required',
