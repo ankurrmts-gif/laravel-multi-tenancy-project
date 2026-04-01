@@ -173,6 +173,7 @@ class DynamicController extends Controller
         // attach permission in response
         return response()->json([
             'data' => $data,
+            'module' => $module,
             'module_permission' => $module_permission
         ]);
     }
@@ -180,7 +181,7 @@ class DynamicController extends Controller
     //create 
     public function create(Request $request,$slug)
     {
-        echo "<pre>"; print_r($request->user()); die();
+        //echo "<pre>"; print_r($request->user()); die();
         tenancy()->end();
         $module = $this->getModule($slug);
 
