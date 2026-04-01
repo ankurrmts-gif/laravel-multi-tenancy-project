@@ -53,7 +53,7 @@ class UserController extends Controller
         //     }
         // }
         $cacheKey = 'users_list_' . md5($request->fullUrl());
-        $users = Cache::tags(['users_list'])->rememberForever($cacheKey, function () use ($request) {
+        $users = Cache::tags(['users_list'])->remember($cacheKey, function () use ($request) {
             $limit = $request->limit ?? 10;
             $sort  = $request->sort ?? 'created_at';
             $dir   = $request->dir ?? 'desc';

@@ -98,6 +98,8 @@ class DatabaseSeeder extends Seeder
             ['key' => 'mini_logo', 'value' => ''],
             ['key' => 'logo', 'value' => ''],
             ['key' => 'default_logo_dark', 'value' => ''],
+            ['key' => 'is_2fa_enabled', 'value' => '1'],
+            ['key' => 'login_otp_expired_minutes', 'value' => '5'],  
             ['key' => 'mini_logo_dark', 'value' => ''],
         ]);
  
