@@ -806,7 +806,7 @@ class AuthController extends Controller
         $tokenExpireMinutes = (int) optional(Settings::where('key','access_token_expires_in_minutes')->first())->value ?? 15;
         $refreshExpireMinutes = (int) optional(Settings::where('key','refresh_token_expires_in_minutes')->first())->value ?? 120;
 
-        $isMfaEnabled = (int) optional(Settings::where('key', 'mfa_enabled')->first())->value ?? 0;
+        $isMfaEnabled = (int) optional(Settings::where('key', 'is_2fa_enabled')->first())->value ?? 0;
 
         /*
         |------------------------------------------------------------------
