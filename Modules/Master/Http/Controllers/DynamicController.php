@@ -173,7 +173,7 @@ class DynamicController extends Controller
         // attach permission in response
         return response()->json([
             'data' => $data,
-            'module' => $module,
+            'action' => $module->actions,
             'module_permission' => $module_permission
         ]);
     }
