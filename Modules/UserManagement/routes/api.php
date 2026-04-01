@@ -39,6 +39,7 @@ Route::middleware([\App\Http\Middleware\AuthenticateSanctumMultiTenant::class])-
     
 // Public API routes
 Route::post('/verify-Mfa', [AuthController::class, 'verifyMfa']);
+Route::post('/resend-otp', [AuthController::class, 'resendOtp']);
 Route::post('/contact-us', [CommonController::class, 'contactUs']);
 
 Route::middleware(['verify.recaptcha', 'throttle:auth-limit'])->group(function () {

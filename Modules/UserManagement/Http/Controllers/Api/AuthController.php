@@ -3,7 +3,7 @@
 namespace Modules\UserManagement\Http\Controllers\Api;
 
 use App\Models\User;
-use App\Models\Settings;
+use App\Models\Settings,App\Models\UserOtp;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
@@ -721,45 +721,78 @@ class AuthController extends Controller
         | FIRST TIME SETUP → GENERATE QR
         |--------------------------------------------------------------------------
         */
-        if (empty($user->google2fa_secret)) {
+        $check2fa = Settings::where('key','is_2fa_enabled')->first();
+        if($check2fa && $check2fa->value === '1'){
+            if (empty($user->google2fa_secret)) {
 
-            $secret = $google2fa->generateSecretKey();
+                $secret = $google2fa->generateSecretKey();
 
-            cache()->put('mfa_setup_'.$userType.'_'.$user->id, $secret, now()->addMinutes(10));
+                cache()->put('mfa_setup_'.$userType.'_'.$user->id, $secret, now()->addMinutes(10));
 
-            $qrCodeUrl = $google2fa->getQRCodeUrl(
-                config('app.name'),
-                $user->email,
-                $secret
-            );
+                $qrCodeUrl = $google2fa->getQRCodeUrl(
+                    config('app.name'),
+                    $user->email,
+                    $secret
+                );
 
-            $renderer = new ImageRenderer(
-                new RendererStyle(200),
-                new SvgImageBackEnd()
-            );
+                $renderer = new ImageRenderer(
+                    new RendererStyle(200),
+                    new SvgImageBackEnd()
+                );
 
-            $writer = new Writer($renderer);
+                $writer = new Writer($renderer);
 
+                return response()->json([
+                    'message' => "Please scan the QR code with Google Authenticator and enter the 6-digit OTP to continue.",
+                    'user_id' => $user->id,
+                    'user_type' => $userType,
+                    'tenant_id' => $tenantId,
+                    'qr_code' => base64_encode($writer->writeString($qrCodeUrl))
+                ]);
+            }
+
+            /*
+            |--------------------------------------------------------------------------
+            | SECRET EXISTS → REQUIRE OTP
+            |--------------------------------------------------------------------------
+            */
             return response()->json([
-                'message' => "Please scan the QR code with Google Authenticator and enter the 6-digit OTP to continue.",
+                'message' => "Please open your Google Authenticator and enter the 6-digit code.",
                 'user_id' => $user->id,
                 'user_type' => $userType,
-                'tenant_id' => $tenantId,
-                'qr_code' => base64_encode($writer->writeString($qrCodeUrl))
+                'tenant_id' => $tenantId
+            ]);
+        }else{
+            $otp = rand(100000, 999999);
+            $expired = Settings::where('key','login_otp_expired_minutes')->first();
+            UserOtp::where([
+                'user_id'   => $user->id,
+                'user_type' => $userType,
+                'tenant_id' => $userType === 'tenant' ? $tenantId : NULL
+            ])->delete();
+            UserOtp::create([
+                'user_id'   => $user->id,
+                'user_type' => $userType,
+                'tenant_id' => $userType === 'tenant' ? $tenantId : NULL,
+                'otp'       => $otp,
+                'expires_at'=> now()->addMinutes(intval($expired->value)) // ⏱ expiry
+            ]);
+
+            // 📧 Send Mail
+            \Mail::raw("Your OTP is: $otp", function ($message) use ($user) {
+                $message->to($user->email)
+                        ->subject('Your Login OTP');
+            });
+
+            return response()->json([
+                'type' => 'email_otp',
+                'message' => 'Please check your Gmail and enter the 6-digit code.',
+                'user_id' => $user->id,
+                'user_type' => $userType,
+                'tenant_id' => $tenantId
             ]);
         }
-
-        /*
-        |--------------------------------------------------------------------------
-        | SECRET EXISTS → REQUIRE OTP
-        |--------------------------------------------------------------------------
-        */
-        return response()->json([
-            'message' => "Please open your Google Authenticator and enter the 6-digit code.",
-            'user_id' => $user->id,
-            'user_type' => $userType,
-            'tenant_id' => $tenantId
-        ]);
+        
     }
  
     public function verifyMfa(Request $request)
@@ -768,7 +801,7 @@ class AuthController extends Controller
             'user_id'   => 'required',
             'otp'       => 'required|digits:6',
             'user_type' => 'required|in:central,tenant',
-            'tenant_id' => 'nullable'
+            'tenant_id' => 'required_if:user_type,tenant'
         ]);
 
         $google2fa = new Google2FA();
@@ -776,12 +809,14 @@ class AuthController extends Controller
         $tokenExpireMinutes = (int) optional(Settings::where('key','access_token_expires_in_minutes')->first())->value ?? 15;
         $refreshExpireMinutes = (int) optional(Settings::where('key','refresh_token_expires_in_minutes')->first())->value ?? 120;
 
+        $isMfaEnabled = (int) optional(Settings::where('key', 'mfa_enabled')->first())->value ?? 0;
+
         /*
-        |--------------------------------------------------------------------------
+        |------------------------------------------------------------------
         | INITIALIZE TENANCY
-        |--------------------------------------------------------------------------
+        |------------------------------------------------------------------
         */
-        if ($request->user_type == 'tenant') {
+        if ($request->user_type === 'tenant') {
             $tenant = Tenant::find($request->tenant_id);
 
             if (!$tenant) {
@@ -793,6 +828,11 @@ class AuthController extends Controller
             tenancy()->end();
         }
 
+        /*
+        |------------------------------------------------------------------
+        | GET USER
+        |------------------------------------------------------------------
+        */
         $user = User::find($request->user_id);
 
         if (!$user) {
@@ -800,41 +840,74 @@ class AuthController extends Controller
         }
 
         /*
-        |--------------------------------------------------------------------------
-        | DETERMINE SECRET (SETUP OR LOGIN)
-        |--------------------------------------------------------------------------
+        |------------------------------------------------------------------
+        | 🔐 GOOGLE MFA ENABLED
+        |------------------------------------------------------------------
         */
-        $cacheKey = 'mfa_setup_'.$request->user_type.'_'.$user->id;
-        $cachedSecret = cache()->get($cacheKey);
+        if ($isMfaEnabled) {
 
-        // Use cached secret if exists (first-time setup)
-        $secret = $cachedSecret ?: $user->google2fa_secret;
+            $cacheKey = 'mfa_setup_'.$request->user_type.'_'.$user->id;
+            $cachedSecret = cache()->get($cacheKey); // only for first-time setup
 
-        if (!$secret || strlen($secret) < 16) {
-            return response()->json(['message' => 'Invalid or missing MFA secret'], 400);
+            $secret = $cachedSecret ?: $user->google2fa_secret;
+
+            if (!$secret || strlen($secret) < 16) {
+                return response()->json([
+                    'message' => 'Invalid or missing MFA secret'
+                ], 400);
+            }
+
+            if (!$google2fa->verifyKey($secret, $request->otp, 4)) {
+                return response()->json([
+                    'message' => 'Invalid OTP'
+                ], 401);
+            }
+
+            // ✅ Save secret if first-time setup
+            if ($cachedSecret) {
+                $user->google2fa_secret = $cachedSecret; // encrypt if needed
+                $user->save();
+
+                cache()->forget($cacheKey);
+            }
         }
 
         /*
-        |--------------------------------------------------------------------------
-        | VERIFY OTP (ALLOW SMALL TIME DRIFT)
-        |--------------------------------------------------------------------------
+        |------------------------------------------------------------------
+        | 📧 EMAIL OTP (WHEN MFA DISABLED)
+        |------------------------------------------------------------------
         */
-        if (!$google2fa->verifyKey($secret, $request->otp, 4)) {
-            return response()->json(['message' => 'Invalid OTP'], 401);
+        else {
+
+            $otpRecord = UserOtp::where([
+                'user_id'   => $user->id,
+                'user_type' => $request->user_type,
+                'tenant_id' => $request->user_type === 'tenant' ? $request->tenant_id : NULL, // ✅ ADD
+                'otp'       => $request->otp
+            ])->latest()->first();
+
+            if (!$otpRecord) {
+                return response()->json([
+                    'message' => 'Invalid OTP'
+                ], 401);
+            }
+
+            // ⏱ Check expiry
+            if (now()->greaterThan($otpRecord->expires_at)) {
+                return response()->json([
+                    'message' => 'OTP expired. Please login again.'
+                ], 400);
+            }
+
+            // ✅ Delete OTP after success
+            $otpRecord->delete();
         }
 
         /*
-        |--------------------------------------------------------------------------
-        | IF FIRST TIME SETUP → SAVE SECRET
-        |--------------------------------------------------------------------------
+        |------------------------------------------------------------------
+        | 🎯 GENERATE TOKENS
+        |------------------------------------------------------------------
         */
-        if ($cachedSecret) {
-            $user->google2fa_secret = $cachedSecret; // encrypt() if you want
-            $user->save();
-
-            cache()->forget($cacheKey);
-        }
-
         return $this->generateTokens(
             $user,
             $request->user_type,
@@ -842,6 +915,100 @@ class AuthController extends Controller
             $tokenExpireMinutes,
             $refreshExpireMinutes
         );
+    }
+
+    public function resendOtp(Request $request)
+    {
+        $request->validate([
+            'user_id'   => 'required',
+            'user_type' => 'required|in:central,tenant',
+            'tenant_id' => 'required_if:user_type,tenant'
+        ]);
+
+        /*
+        |---------------------------------------------------------------
+        | CHECK MFA SETTING
+        |---------------------------------------------------------------
+        */
+        $isMfaEnabled = (int) optional(Settings::where('key', 'is_2fa_enabled')->first())->value ?? 0;
+
+        if ($isMfaEnabled) {
+            return response()->json([
+                'message' => 'Resend OTP not allowed when Google MFA is enabled.'
+            ], 400);
+        }
+
+        /*
+        |---------------------------------------------------------------
+        | INIT TENANCY
+        |---------------------------------------------------------------
+        */
+        if ($request->user_type === 'tenant') {
+            $tenant = Tenant::find($request->tenant_id);
+
+            if (!$tenant) {
+                return response()->json(['message' => 'Tenant not found'], 404);
+            }
+
+            tenancy()->initialize($tenant);
+        } else {
+            tenancy()->end();
+        }
+
+        /*
+        |---------------------------------------------------------------
+        | GET USER
+        |---------------------------------------------------------------
+        */
+        $user = User::find($request->user_id);
+
+        if (!$user) {
+            return response()->json(['message' => 'User not found'], 404);
+        }
+
+        /*
+        |---------------------------------------------------------------
+        | FIND EXISTING OTP
+        |---------------------------------------------------------------
+        */
+        $otpRecord = UserOtp::where([
+            'user_id'   => $user->id,
+            'user_type' => $request->user_type,
+            'tenant_id' => $request->user_type === 'tenant' ? $request->tenant_id : NULL, 
+        ])->latest()->first();
+
+        if (!$otpRecord) {
+            return response()->json([
+                'message' => 'OTP not found. Please login again.'
+            ], 400);
+        }
+
+        /*
+        |---------------------------------------------------------------
+        | UPDATE ONLY OTP + EXPIRY
+        |---------------------------------------------------------------
+        */
+        $otp = rand(100000, 999999);
+        $expired = Settings::where('key','login_otp_expired_minutes')->first();
+
+        $otpRecord->update([
+            'otp'        => $otp,
+            'expires_at' => now()->addMinutes(intval($expired->value))
+        ]);
+
+        /*
+        |---------------------------------------------------------------
+        | SEND EMAIL
+        |---------------------------------------------------------------
+        */
+        \Mail::raw("Your OTP is: $otp", function ($message) use ($user) {
+            $message->to($user->email)
+                    ->subject('Your OTP');
+        });
+
+        return response()->json([
+            'message' => 'OTP resent successfully'
+        ]);
     }
 
     private function generateTokens($user, $userType, $tenantId = null, $tokenExpireMinutes, $refreshExpireMinutes)
