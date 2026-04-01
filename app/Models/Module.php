@@ -20,6 +20,7 @@ class Module extends Model
         'order_number',
         'tenant_id',
         'actions',
+        'permissions',
         'created_by',
     ];
 

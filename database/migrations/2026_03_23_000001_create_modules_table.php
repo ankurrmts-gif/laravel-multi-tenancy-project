@@ -23,6 +23,7 @@ return new class extends Migration
             $table->integer('order_number')->default(0);
             $table->string('tenant_id')->nullable();
             $table->json('actions')->nullable(); // {"create": true, "edit": true, etc.}
+            $table->json('permissions')->nullable();
             $table->unsignedBigInteger('created_by');
             $table->timestamps();
 
