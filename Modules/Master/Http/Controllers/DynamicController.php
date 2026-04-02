@@ -140,21 +140,39 @@ class DynamicController extends Controller
         // Get module
         $module = $this->getModule($slug);
 
-        // Get permissions
-        if ($module->created_by == $user->id) {
+        // ✅ Step 1: Check module-specific permissions
+        $modulePermissions = ModulePermission::where([
+            'module_id' => $module->id,
+            'user_id'   => $user->id
+        ])->get();
 
-            $module_permission = ModulePermission::where([
-                'module_id' => $module->id,
-                'user_id'   => $user->id
-            ])->get();
+        if ($modulePermissions->isNotEmpty()) {
+
+            // ✅ Use module permissions
+            $module_permission = $modulePermissions->pluck('permission_name'); 
+            // change column if your field name is different
 
         } else {
 
+            if($request->filled('tenant_id')){
+                $tenant_id = $request->tenant_id;
+                tenancy()->initialize($tenant_id);
+            }
+            // ✅ Fallback to role permissions
             $module_permission = $user->roles()
-                ->with('permissions')
-                ->get()
-                ->pluck('permissions')
-                ->flatten();
+            ->whereHas('permissions', function ($q) use ($module) {
+                $q->where('name', 'like', $module->slug . '_%');
+            })
+            ->with(['permissions' => function ($q) use ($module) {
+                $q->where('name', 'like', $module->slug . '_%');
+            }])
+            ->get()
+            ->pluck('permissions')
+            ->flatten()
+            ->pluck('name')
+            ->values(); // assuming permission column = name
+
+            tenancy()->end();
         }
 
         // dynamic table name
@@ -170,7 +188,7 @@ class DynamicController extends Controller
         // latest records
         $data = $query->latest()->paginate(10);
 
-        // attach permission in response
+        // response
         return response()->json([
             'data' => $data,
             'action' => $module->actions,
