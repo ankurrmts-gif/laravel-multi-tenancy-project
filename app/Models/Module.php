@@ -27,6 +27,7 @@ class Module extends Model
     protected $casts = [
         'status' => 'boolean',
         'actions' => 'array',
+        'permissions' => 'array',
     ];
 
     public function fields()

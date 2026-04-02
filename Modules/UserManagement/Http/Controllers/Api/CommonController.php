@@ -136,8 +136,9 @@ class CommonController extends Controller
                 $base64 = $request->input("settings.$index.value");
 
                 if ($base64) {
-                    // 👉 Check base64 format (data:image/png;base64,...)
-                    if (preg_match('/^data:image\/(\w+);base64,/', $base64, $type)) {
+                    // ✅ Detect image type (including svg+xml)
+                    if (preg_match('/^data:image\/([a-zA-Z0-9\+\-\.]+);base64,/', $base64, $type)) {
+
                         $image = substr($base64, strpos($base64, ',') + 1);
                         $image = base64_decode($image);
 
@@ -145,7 +146,11 @@ class CommonController extends Controller
                             throw new \Exception('Base64 decode failed');
                         }
 
-                        $extension = strtolower($type[1]); // png, jpg, jpeg, svg, ico
+                        // ✅ Fix extension for svg+xml
+                        $extension = strtolower($type[1]);
+                        if ($extension === 'svg+xml') {
+                            $extension = 'svg';
+                        }
 
                         // 👉 Allowed extensions
                         if (!in_array($extension, ['jpg', 'jpeg', 'png', 'gif', 'webp', 'ico', 'svg'])) {
@@ -345,4 +350,176 @@ class CommonController extends Controller
             'message' => 'Your message has been sent. We will get back to you shortly.'
         ], 200);
     }
+
+    public function getSmtpSettings()
+    {
+        return response()->json([
+            'status' => true,
+            'data' => [
+                'MAIL_MAILER'       => env('MAIL_MAILER'),
+                'MAIL_HOST'         => env('MAIL_HOST'),
+                'MAIL_PORT'         => env('MAIL_PORT'),
+                'MAIL_USERNAME'     => env('MAIL_USERNAME'),
+                'MAIL_PASSWORD'     => env('MAIL_PASSWORD'),
+                'MAIL_ENCRYPTION'   => env('MAIL_ENCRYPTION'),
+                'MAIL_FROM_ADDRESS' => env('MAIL_FROM_ADDRESS'),
+                'MAIL_FROM_NAME'    => env('MAIL_FROM_NAME'),
+            ]
+        ]);
+    }
+
+    public function updateSmtp(Request $request)
+    {
+        $request->validate([
+            'MAIL_MAILER'       => 'required|string',
+            'MAIL_HOST'         => 'required|string',
+            'MAIL_PORT'         => 'required|numeric',
+            'MAIL_USERNAME'     => 'nullable|string',
+            'MAIL_PASSWORD'     => 'nullable|string',
+            'MAIL_ENCRYPTION'   => 'nullable|string',
+            'MAIL_FROM_ADDRESS' => 'required|email',
+            'MAIL_FROM_NAME'    => 'required|string',
+        ]);
+
+        try {
+            $smtpValues = [
+                'MAIL_MAILER'       => $request->MAIL_MAILER,
+                'MAIL_HOST'         => $request->MAIL_HOST,
+                'MAIL_PORT'         => $request->MAIL_PORT,
+                'MAIL_USERNAME'     => $request->MAIL_USERNAME ?? '',
+                'MAIL_PASSWORD'     => $request->MAIL_PASSWORD ?? '',
+                'MAIL_ENCRYPTION'   => $request->MAIL_ENCRYPTION ?? '',
+                'MAIL_FROM_ADDRESS' => $request->MAIL_FROM_ADDRESS,
+                'MAIL_FROM_NAME'    => $request->MAIL_FROM_NAME,
+            ];
+
+            foreach ($smtpValues as $key => $value) {
+                $this->setEnvValue($key, $value);
+                putenv("{$key}={$value}");
+                $_ENV[$key] = $value;
+                $_SERVER[$key] = $value;
+            }
+
+            config([
+                'mail.default' => $smtpValues['MAIL_MAILER'],
+                'mail.mailers.smtp.transport' => $smtpValues['MAIL_MAILER'],
+                'mail.mailers.smtp.host' => $smtpValues['MAIL_HOST'],
+                'mail.mailers.smtp.port' => $smtpValues['MAIL_PORT'],
+                'mail.mailers.smtp.username' => $smtpValues['MAIL_USERNAME'],
+                'mail.mailers.smtp.password' => $smtpValues['MAIL_PASSWORD'],
+                'mail.mailers.smtp.encryption' => $smtpValues['MAIL_ENCRYPTION'],
+                'mail.from.address' => $smtpValues['MAIL_FROM_ADDRESS'],
+                'mail.from.name' => $smtpValues['MAIL_FROM_NAME'],
+            ]);
+
+            Artisan::call('config:clear');
+            Artisan::call('cache:clear');
+            Artisan::call('config:cache');
+
+            return response()->json([
+                'status' => true,
+                'message' => 'SMTP settings updated successfully'
+            ], 200);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => false,
+                'message' => 'Unable to update SMTP settings. ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    protected function setEnvValue($key, $value)
+    {
+        $path = base_path('.env');
+
+        if (!file_exists($path)) {
+            throw new \RuntimeException('.env file not found');
+        }
+
+        $env = file_get_contents($path);
+        $safeKey = preg_quote($key, '/');
+
+        $value = $value === null ? '' : (string) $value;
+
+        // Avoid TypeError in PHP 8+ (needle must be string) by using regex match for special chars.
+        if (preg_match('/[\s"#]/', $value)) {
+            $value = '"' . str_replace('"', '\\"', trim($value, '"')) . '"';
+        }
+
+        $newLine = "{$key}={$value}";
+
+        if (preg_match("/^{$safeKey}=.*$/m", $env)) {
+            $env = preg_replace("/^{$safeKey}=.*$/m", $newLine, $env);
+        } else {
+            $env = rtrim($env, "\n") . "\n" . $newLine;
+        }
+
+        file_put_contents($path, $env);
+    }
+
+    public function getRecaptchaSettings()
+    {
+        return response()->json([
+            'status' => true,
+            'data' => [
+                'RECAPTCHA_SITE'   => config('services.recaptcha.site_key') ?? env('RECAPTCHA_SITE'),
+                'RECAPTCHA_SECRET' => config('services.recaptcha.secret_key') ?? env('RECAPTCHA_SECRET'), // 🔐 hide secret
+            ]
+        ]);
+    }
+
+    public function updateRecaptchaSettings(Request $request)
+    {
+        $request->validate([
+            'RECAPTCHA_SITE'   => 'required|string',
+            'RECAPTCHA_SECRET' => 'nullable|string',
+        ]);
+
+        try {
+
+            // ✅ Update .env
+            $this->setEnvValueRecaptcha('RECAPTCHA_SITE', $request->RECAPTCHA_SITE);
+
+            if ($request->filled('RECAPTCHA_SECRET')) {
+                $this->setEnvValueRecaptcha('RECAPTCHA_SECRET', $request->RECAPTCHA_SECRET);
+            }
+
+            // ✅ Clear cache
+            Artisan::call('config:clear');
+            Artisan::call('cache:clear');
+
+            return response()->json([
+                'status' => true,
+                'message' => 'reCAPTCHA settings updated successfully'
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => false,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    protected function setEnvValueRecaptcha($key, $value)
+    {
+        $path = base_path('.env');
+
+        if (file_exists($path)) {
+
+            $env = file_get_contents($path);
+
+            $newLine = $key . '=' . $value;
+
+            if (strpos($env, $key . '=') !== false) {
+                $env = preg_replace("/^{$key}=.*/m", $newLine, $env);
+            } else {
+                $env .= "\n" . $newLine;
+            }
+
+            file_put_contents($path, $env);
+        }
+    }
+
 }

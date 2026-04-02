@@ -94,12 +94,12 @@ class DatabaseSeeder extends Seeder
             ['key' => 'login_attempt_seconds', 'value' => '6'],   // gap in seconds
             ['key' => 'login_attempt_minute', 'value' => '5'],     // per minute
             ['key' => 'login_attempt_hour', 'value' => '30'],      // per hour
+            ['key' => 'is_2fa_enabled', 'value' => '1'],
+            ['key' => 'login_otp_expired_minutes', 'value' => '5'],
             ['key' => 'favicon_icon', 'value' => 'uploads/settings/1774937399_69cb65370c2a6.jpeg'],
             ['key' => 'mini_logo', 'value' => ''],
             ['key' => 'logo', 'value' => ''],
             ['key' => 'default_logo_dark', 'value' => ''],
-            ['key' => 'is_2fa_enabled', 'value' => '1'],
-            ['key' => 'login_otp_expired_minutes', 'value' => '5'],  
             ['key' => 'mini_logo_dark', 'value' => ''],
         ]);
  

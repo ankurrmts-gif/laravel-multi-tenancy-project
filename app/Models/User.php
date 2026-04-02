@@ -25,15 +25,15 @@ class User extends Authenticatable implements MustVerifyEmail
         'first_name',
         'last_name',
         'email',
-        'created_by',
         'password',
         'google2fa_secret',
         'user_type',
         'failed_attempts',
         'locked_until',
         'tenant_id',
-        'email_verified_at'
-    ];
+        'email_verified_at',
+        'created_by',
+        ];
 
     /**
      * The attributes that should be hidden for serialization.

@@ -96,7 +96,13 @@ Route::middleware(\App\Http\Middleware\AuthenticateSanctumMultiTenant::class)->g
     Route::get('/get-column-types', [CommonController::class, 'getColumnTypes']);
     Route::get('/get-all-models', [CommonController::class, 'getAllModels']);
     Route::get('/get-all-model-fields/{model_name}', [CommonController::class, 'getAllModelFields']);
+    
+    Route::get('/smtp-settings', [CommonController::class, 'getSmtpSettings']);
+    Route::post('/update-smtp-settings', [CommonController::class, 'updateSmtp']);
 
+    Route::get('/recaptcha-settings', [CommonController::class, 'getRecaptchaSettings']);
+    Route::post('/update-recaptcha-settings', [CommonController::class, 'updateRecaptchaSettings']);
+    
     // Route::prefix('modules')->group(function () {
     //     Route::post('/', [ModuleController::class, 'store']);
     //     Route::get('/', [ModuleController::class, 'index']);
