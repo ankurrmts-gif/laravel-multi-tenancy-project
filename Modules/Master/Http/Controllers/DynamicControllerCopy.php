@@ -297,12 +297,10 @@ class DynamicController extends Controller
         $data = [];
 
         foreach ($module->fields as $field) {
-
             $inputType = $field->column_type_id ?? $field->columnType->column_type_id;
 
             // FILES
             if (in_array($inputType, [14,15])) {
-
                 if (!$field->is_multiple) {
                     $file = $this->handleSingleFile($request, $table, $field);
                     if ($file) {
@@ -318,18 +316,17 @@ class DynamicController extends Controller
                 $data[$field->db_column] = $request->{$field->db_column};
             }
         }
-
+        
+        $data['created_at'] = now();
         $id = DB::table($table)->insertGetId($data);
 
         /*
         | MULTIPLE FILES
         */
         foreach ($module->fields as $field) {
-
             $inputType = $field->column_type_id ?? $field->columnType->column_type_id;
 
             if (in_array($inputType, [14,15]) && $field->is_multiple) {
-
                 $filesData = $this->handleMultipleFiles($request, $table, $fk, $field, $id);
 
                 if (!empty($filesData)) {
@@ -724,6 +721,7 @@ class DynamicController extends Controller
         }
 
         // ✅ UPDATE MAIN TABLE
+        $data['updated_at'] = now();
         DB::table($table)->where('id', $id)->update($data);
 
         /*

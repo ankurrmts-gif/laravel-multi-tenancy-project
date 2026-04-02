@@ -64,12 +64,8 @@ class ModulesController extends Controller
 
             $allowed = $modules;
 
-            if($user->user_type == 'tenant'){
-                $allowed = $modules;
-            }else{
-                $allowed = $modules->filter(fn($module) => $this->userCanAccessModule($module, $user));
-            }
-
+          
+            $allowed = $modules->filter(fn($module) => $this->userCanAccessModule($module, $user));
             $tree  = [];
             $items = [];
 
@@ -177,6 +173,16 @@ class ModulesController extends Controller
             return false;
         }
 
+        $permissionName = $module->slug . '_access';
+
+        if($user->user_type === 'tenant'){
+            tenancy()->initialize($user->tenant_id);
+            if (! $user->hasPermissionTo($permissionName, 'sanctum')) {
+                return false;
+            }
+            tenancy()->end();
+        }
+
         // user_type restrictions
         if (! empty($module->user_type) && $module->user_type !== 'all' && $module->user_type !== $user->user_type) {
             return false;
@@ -186,7 +192,6 @@ class ModulesController extends Controller
             return true;
         }
 
-        $permissionName = $module->slug . '_access';
         $permissionCount = ModulePermission::where('module_id', $module->id)->where('permission_name', $permissionName)->count();
 
         // fallback: if no permission is defined for this module, allow it
@@ -390,7 +395,7 @@ class ModulesController extends Controller
                     if ($moduleData['tenant_user_type'] === 'all') {
                         $roles = Role::all();
                     }else{
-                        $roles = Role::whereIn('id', $moduleData['tenant_user_type'])->get();
+                        $roles = Role::where('id', $moduleData['tenant_user_type'])->get();
                     }
                     foreach ($roles as $role) {
                         if ($role) {
@@ -547,7 +552,7 @@ class ModulesController extends Controller
 
     public function show($id)
     {
-        $module = Module::with(['fields.options', 'assignedAdmins', 'assignedAgencies', 'permissions'])->findOrFail($id);
+        $module = Module::with(['fields.options', 'assignedAdmins', 'assignedAgencies'])->findOrFail($id);
         return response()->json(['success' => true, 'data' => $module]);
     }
 
@@ -704,29 +709,30 @@ class ModulesController extends Controller
             return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
         }
 
-        DB::beginTransaction();
+        $moduleData = $request->input('module');
+        $user       = auth()->user();
+
+        // ── Resolve Tenant ──────────────────────────────────────────────────────
+        $resolvedTenantId = $this->resolveTenantId($request, $moduleData);
+        if ($resolvedTenantId !== null) {
+            $moduleData['tenant_id'] = $resolvedTenantId;
+        }
+
+        if (empty($module->created_by)) {
+            $moduleData['created_by'] = $user->id;
+        }
+
+        // ── Capture OLD fields BEFORE any changes ───────────────────────────────
+        $oldFields = $module->fields()->with('columnType')->get()->keyBy('db_column');
+
+        // ── PHASE 1: DB Transaction (Module data, permissions, fields) ──────────
         try {
-            $moduleData = $request->input('module');
-            $user       = auth()->user();
+            DB::beginTransaction();
 
-            // ── Resolve Tenant ──────────────────────────────────────────────────
-            $resolvedTenantId = $this->resolveTenantId($request, $moduleData);
-            if ($resolvedTenantId !== null) {
-                $moduleData['tenant_id'] = $resolvedTenantId;
-            }
-
-            // Preserve original creator
-            if (empty($module->created_by)) {
-                $moduleData['created_by'] = $user->id;
-            }
-
-            // ── 1. OLD Fields capture (before update) ───────────────────────────
-            $oldFields = $module->fields()->with('columnType')->get()->keyBy('db_column');
-
-            // ── 2. Update Module Record ─────────────────────────────────────────
+            // 1. Update Module Record
             $module->update($moduleData);
 
-            // ── 3. Sync Assignments ─────────────────────────────────────────────
+            // 2. Sync Assignments
             $module->assignedAdmins()->sync(
                 collect($moduleData['assigned_admins'] ?? [])
                     ->map(fn($a) => is_array($a) ? $a['id'] : $a)
@@ -738,18 +744,11 @@ class ModulesController extends Controller
                     ->toArray()
             );
 
-            // ── 4. Permissions ──────────────────────────────────────────────────
-            $permissionActions = [
-                1 => 'access',
-                2 => 'create',
-                3 => 'edit',
-                4 => 'show',
-                5 => 'delete',
-            ];
+            // 3. Permissions
+            $permissionActions    = [1 => 'access', 2 => 'create', 3 => 'edit', 4 => 'show', 5 => 'delete'];
             $allPermissionActions = ['access', 'create', 'edit', 'show', 'delete'];
             $selectedPermissions  = [];
 
-            // Ensure all base permissions exist
             $allPermissions = collect($allPermissionActions)->map(function ($action) use ($module) {
                 return Permission::firstOrCreate([
                     'name'       => $module->slug . '_' . $action,
@@ -757,13 +756,11 @@ class ModulesController extends Controller
                 ]);
             });
 
-            // Super Admin always gets all
             $superAdminRole = Role::where('name', 'Super Admin')->first();
             if ($superAdminRole) {
                 $superAdminRole->givePermissionTo($allPermissions);
             }
 
-            // Build selected permissions from request
             if (!empty($moduleData['permissions'])) {
                 foreach ($moduleData['permissions'] as $permId) {
                     $action = $permissionActions[$permId] ?? null;
@@ -773,8 +770,8 @@ class ModulesController extends Controller
                 }
             }
 
-            // Delete old module permissions and recreate for current user
             $module->permissions()->delete();
+
             foreach ($allPermissions as $permission) {
                 ModulePermission::updateOrCreate([
                     'module_id'       => $module->id,
@@ -783,7 +780,53 @@ class ModulesController extends Controller
                 ]);
             }
 
-            // Assign permissions by user_type
+            if (!empty($module->tenant_id) && $user->user_type === 'agency') {
+
+                $tenant = Tenant::find($user->tenant_id);
+
+                if ($tenant) {
+
+                    tenancy()->initialize($tenant);
+
+                    // ✅ Ensure permissions exist
+                    foreach ($allPermissions as $permission) {
+                        Permission::firstOrCreate([
+                            'name' => $permission->name,
+                            'guard_name' => 'sanctum'
+                        ]);
+                    }
+
+                    // ✅ Assign to roles
+                    if (!empty($moduleData['tenant_user_type'])) {
+
+                        if ($moduleData['tenant_user_type'] === 'all') {
+                            $roles = Role::all();
+                        } else {
+                            $roles = Role::where('id', $moduleData['tenant_user_type'])->get();
+                        }
+
+                        foreach ($roles as $role) {
+                            if ($role) {
+                                // 🔥 KEY CHANGE HERE
+                                $existing = $role->permissions->pluck('name');
+
+                                $finalPermissions = $existing
+                                    ->reject(fn($perm) => str_starts_with($perm, $module->slug . '_'))
+                                    ->merge($selectedPermissions)
+                                    ->unique()
+                                    ->values()
+                                    ->toArray();
+
+                                $role->syncPermissions($finalPermissions);
+
+                            }
+                        }
+                    }
+
+                    tenancy()->end();
+                }
+            }
+
             if (!empty($moduleData['user_type']) && !empty($selectedPermissions)) {
                 $userType = $moduleData['user_type'];
 
@@ -839,33 +882,54 @@ class ModulesController extends Controller
                 tenancy()->end();
             }
 
-            // ── 5. Sync Fields ──────────────────────────────────────────────────
-            $module->fields()->delete(); // cascades to options
+            // 4. Sync Fields
+            $module->fields()->delete();
 
             if ($request->has('fields')) {
                 foreach ($request->input('fields') as $fieldData) {
-                    $field = ModuleField::create(array_merge($fieldData, ['module_id' => $module->id]));
+                    // Remove id so new record create thay
+                    unset($fieldData['id']);
+
+                    $field = ModuleField::create(array_merge(
+                        $fieldData,
+                        ['module_id' => $module->id]
+                    ));
+
                     if (!empty($fieldData['options'])) {
                         foreach ($fieldData['options'] as $option) {
-                            ModuleFieldOption::create(array_merge($option, ['module_field_id' => $field->id]));
+                            unset($option['id']);
+                            ModuleFieldOption::create(array_merge(
+                                $option,
+                                ['module_field_id' => $field->id]
+                            ));
                         }
                     }
                 }
             }
 
-            // Reload fresh fields with relations
-            $module->load('fields.columnType');
-
-            // ── 6. Regenerate All Files ─────────────────────────────────────────
-            $this->updateModuleFiles($module, $oldFields);
-
             DB::commit();
-            return response()->json(['success' => true, 'message' => 'Module updated successfully']);
 
         } catch (\Exception $e) {
-            DB::rollback();
-            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
+            DB::rollBack();
+            return response()->json([
+                'success' => false,
+                'message' => 'DB Error: ' . $e->getMessage()
+            ], 500);
         }
+
+        // ── PHASE 2: File Generation (Transaction BAHAR — migration conflict avoid) ──
+        try {
+            $module->load('fields.columnType');
+            $this->updateModuleFiles($module, $oldFields);
+        } catch (\Exception $e) {
+            // File generation fail thay to pan module update successful che
+            return response()->json([
+                'success' => true,
+                'message' => 'Module updated successfully (file generation warning: ' . $e->getMessage() . ')'
+            ]);
+        }
+
+        return response()->json(['success' => true, 'message' => 'Module updated successfully']);
     }
 
     private function updateModuleFiles($module, $oldFields = null)
@@ -880,69 +944,63 @@ class ModulesController extends Controller
         $oldColumnKeys = $oldFields ? $oldFields->keys()->toArray() : [];
         $newColumnKeys = $newFields->keys()->toArray();
 
-        $addedColumns   = array_diff($newColumnKeys, $oldColumnKeys); // nava fields
-        $removedColumns = array_diff($oldColumnKeys, $newColumnKeys); // delete thayela fields
+        $addedColumns   = array_diff($newColumnKeys, $oldColumnKeys);
+        $removedColumns = array_diff($oldColumnKeys, $newColumnKeys);
 
-        // ── A. ALTER Migration (ADD new + DROP removed columns) ─────────────────
+        // ── A. ALTER Migration — ADD new columns + DROP removed columns ──────────
         $upStatements   = '';
         $downStatements = '';
 
-        // ADD new columns
+        // ADD
         foreach ($addedColumns as $col) {
             $field     = $newFields[$col];
             $inputType = $field->column_type_id ?? ($field->columnType->column_type_id ?? null);
             $type      = $field->columnType->db_type ?? 'string';
 
             if ($field->model_name && !$field->is_multiple) {
-                // BelongsTo FK
-                $upStatements   .= "\n            \$table->unsignedBigInteger('{$col}')->nullable();";
-                $downStatements .= "\n            \$table->dropColumn('{$col}');";
+                $upStatements   .= "\n        \$table->unsignedBigInteger('{$col}')->nullable();";
+                $downStatements .= "\n        \$table->dropColumn('{$col}');";
             } elseif (!in_array($inputType, [14, 15])) {
-                // Normal field
-                $upStatements   .= "\n            \$table->{$type}('{$col}')->nullable();";
-                $downStatements .= "\n            \$table->dropColumn('{$col}');";
+                $upStatements   .= "\n        \$table->{$type}('{$col}')->nullable();";
+                $downStatements .= "\n        \$table->dropColumn('{$col}');";
             } elseif (in_array($inputType, [14, 15]) && !$field->is_multiple) {
-                // Single file column
-                $upStatements   .= "\n            \$table->string('{$col}')->nullable();";
-                $downStatements .= "\n            \$table->dropColumn('{$col}');";
+                $upStatements   .= "\n        \$table->string('{$col}')->nullable();";
+                $downStatements .= "\n        \$table->dropColumn('{$col}');";
             }
-            // Multiple file → separate table (handle below)
+            // Multiple file → alag table (niche handle)
         }
 
-        // DROP removed columns
+        // DROP
         foreach ($removedColumns as $col) {
             $oldField  = $oldFields[$col];
             $inputType = $oldField->column_type_id ?? ($oldField->columnType->column_type_id ?? null);
-            $type      = $oldField->columnType->db_type ?? 'string';
 
-            // Multiple file fields → alag table drop kariye (niche handle)
-            // Single file / normal field → column drop
+            // Multiple file → alag table drop (niche handle)
             if (in_array($inputType, [14, 15]) && $oldField->is_multiple) {
-                // Alag table che, column nathi — skip here, handle below
                 continue;
             }
 
-            // Safety check — column exist kare to j drop karo
-            $upStatements   .= "\n            if (Schema::hasColumn('{$table}', '{$col}')) {";
-            $upStatements   .= "\n                \$table->dropColumn('{$col}');";
-            $upStatements   .= "\n            }";
+            // Column exist kare to j drop karo
+            $upStatements .= "\n        if (\\Schema::hasColumn('{$table}', '{$col}')) {";
+            $upStatements .= "\n            \$table->dropColumn('{$col}');";
+            $upStatements .= "\n        }";
 
-            // Rollback ma best-effort re-add
+            // Rollback best-effort
+            $type = $oldField->columnType->db_type ?? 'string';
             if ($oldField->model_name && !$oldField->is_multiple) {
-                $downStatements .= "\n            \$table->unsignedBigInteger('{$col}')->nullable();";
+                $downStatements .= "\n        \$table->unsignedBigInteger('{$col}')->nullable();";
             } elseif (!in_array($inputType, [14, 15])) {
-                $downStatements .= "\n            \$table->{$type}('{$col}')->nullable();";
+                $downStatements .= "\n        \$table->{$type}('{$col}')->nullable();";
             } else {
-                $downStatements .= "\n            \$table->string('{$col}')->nullable();";
+                $downStatements .= "\n        \$table->string('{$col}')->nullable();";
             }
         }
 
-        // Migration file generate karo (jyare koi change hoy)
         if (!empty(trim($upStatements))) {
             $alterDate     = $baseTime->format('Y_m_d_His');
             $migrationName = "alter_{$table}_sync_columns";
 
-            $alterMigration = <<<PHP
+            $alterMigration = <<<MIGPHP
             <?php
 
             use Illuminate\Database\Migrations\Migration;
@@ -963,7 +1021,7 @@ class ModulesController extends Controller
                     });
                 }
             };
-            PHP;
+            MIGPHP;
 
             $alterPath = database_path("migrations/{$alterDate}_{$migrationName}.php");
             File::put($alterPath, $alterMigration);
@@ -980,7 +1038,6 @@ class ModulesController extends Controller
 
             if (in_array($inputType, [14, 15]) && $oldField->is_multiple) {
                 $attachTable = "{$table}_" . Str::plural($col);
-
                 if (\Schema::hasTable($attachTable)) {
                     \Schema::dropIfExists($attachTable);
                 }
@@ -998,7 +1055,7 @@ class ModulesController extends Controller
                     $date = $baseTime->copy()->addSeconds($i)->format('Y_m_d_His');
                     $i++;
 
-                    $migration = <<<PHP
+                    $attachMigration = <<<MIGPHP
                     <?php
 
                     use Illuminate\Database\Migrations\Migration;
@@ -1017,10 +1074,8 @@ class ModulesController extends Controller
                                 \$table->string('mime_type')->nullable();
                                 \$table->integer('file_size')->nullable();
                                 \$table->timestamps();
-
                                 \$table->foreign('{$fk}_id')
-                                    ->references('id')
-                                    ->on('{$table}')
+                                    ->references('id')->on('{$table}')
                                     ->cascadeOnDelete();
                             });
                         }
@@ -1030,10 +1085,10 @@ class ModulesController extends Controller
                             Schema::dropIfExists('{$attachTable}');
                         }
                     };
-                    PHP;
+                    MIGPHP;
 
                     $path = database_path("migrations/{$date}_create_{$attachTable}.php");
-                    File::put($path, $migration);
+                    File::put($path, $attachMigration);
                     Artisan::call('migrate', [
                         '--path'  => "database/migrations/{$date}_create_{$attachTable}.php",
                         '--force' => true,
@@ -1042,19 +1097,16 @@ class ModulesController extends Controller
             }
         }
 
-        // ── D. Removed Pivot Tables → DROP (jyare belongsToMany field remove thay) ──
+        // ── D. Removed Pivot Tables → DROP ──────────────────────────────────────
         $oldPivots = [];
         if ($oldFields) {
             foreach ($oldFields as $col => $oldField) {
                 if ($oldField->model_name && $oldField->is_multiple) {
                     $relatedModel = Str::singular($oldField->model_name);
                     $relatedTable = strtolower(Str::plural($relatedModel));
-
-                    $tables = [$table, $relatedTable];
+                    $tables       = [$table, $relatedTable];
                     sort($tables);
-                    $pivot = implode('_', $tables);
-
-                    $oldPivots[$pivot] = true;
+                    $oldPivots[implode('_', $tables)] = true;
                 }
             }
         }
@@ -1064,16 +1116,12 @@ class ModulesController extends Controller
             if ($field->model_name && $field->is_multiple) {
                 $relatedModel = Str::singular($field->model_name);
                 $relatedTable = strtolower(Str::plural($relatedModel));
-
-                $tables = [$table, $relatedTable];
+                $tables       = [$table, $relatedTable];
                 sort($tables);
-                $pivot = implode('_', $tables);
-
-                $newPivots[$pivot] = true;
+                $newPivots[implode('_', $tables)] = true;
             }
         }
 
-        // Old pivot che pan new ma nathi → DROP
         foreach (array_diff_key($oldPivots, $newPivots) as $pivot => $_) {
             if (\Schema::hasTable($pivot)) {
                 \Schema::dropIfExists($pivot);
@@ -1087,8 +1135,7 @@ class ModulesController extends Controller
                 $relatedModel = Str::singular($field->model_name);
                 $relatedTable = strtolower(Str::plural($relatedModel));
                 $relatedFk    = strtolower(Str::singular($relatedModel));
-
-                $tables = [$table, $relatedTable];
+                $tables       = [$table, $relatedTable];
                 sort($tables);
                 $pivot = implode('_', $tables);
 
@@ -1099,7 +1146,7 @@ class ModulesController extends Controller
                     $date = $baseTime->copy()->addSeconds($i)->format('Y_m_d_His');
                     $i++;
 
-                    $migration = <<<PHP
+                    $pivotMigration = <<<MIGPHP
                     <?php
 
                     use Illuminate\Database\Migrations\Migration;
@@ -1115,15 +1162,11 @@ class ModulesController extends Controller
                                 \$table->unsignedBigInteger('{$fk}_id');
                                 \$table->unsignedBigInteger('{$relatedFk}_id');
                                 \$table->timestamps();
-
                                 \$table->foreign('{$fk}_id')
-                                    ->references('id')
-                                    ->on('{$table}')
+                                    ->references('id')->on('{$table}')
                                     ->cascadeOnDelete();
-
                                 \$table->foreign('{$relatedFk}_id')
-                                    ->references('id')
-                                    ->on('{$relatedTable}')
+                                    ->references('id')->on('{$relatedTable}')
                                     ->cascadeOnDelete();
                             });
                         }
@@ -1133,10 +1176,10 @@ class ModulesController extends Controller
                             Schema::dropIfExists('{$pivot}');
                         }
                     };
-                    PHP;
+                    MIGPHP;
 
                     $path = database_path("migrations/{$date}_create_{$pivot}.php");
-                    File::put($path, $migration);
+                    File::put($path, $pivotMigration);
                     Artisan::call('migrate', [
                         '--path'  => "database/migrations/{$date}_create_{$pivot}.php",
                         '--force' => true,
@@ -1145,8 +1188,11 @@ class ModulesController extends Controller
             }
         }
 
-        // ── F. Regenerate Model File ────────────────────────────────────────────
-        $modelContent = "<?php\n\nnamespace App\\Models;\n\nuse Illuminate\\Database\\Eloquent\\Model;\n\nclass {$modelName} extends Model\n{\n    protected \$table = '{$table}';\n\n    protected \$fillable = [";
+        // ── F. Regenerate Model ──────────────────────────────────────────────────
+        $modelContent  = "<?php\n\nnamespace App\\Models;\n\nuse Illuminate\\Database\\Eloquent\\Model;\n\n";
+        $modelContent .= "class {$modelName} extends Model\n{\n";
+        $modelContent .= "    protected \$table = '{$table}';\n\n";
+        $modelContent .= "    protected \$fillable = [";
 
         foreach ($module->fields as $field) {
             $inputType = $field->column_type_id ?? ($field->columnType->column_type_id ?? null);
@@ -1162,19 +1208,19 @@ class ModulesController extends Controller
             if (in_array($inputType, [14, 15]) && $field->is_multiple) {
                 $relation    = Str::camel(Str::plural($field->db_column));
                 $attachModel = $modelName . ucfirst($relation);
-                $modelContent .= "\n\n    public function {$relation}()\n    {\n        return \$this->hasMany(\\App\\Models\\{$attachModel}::class, '{$fk}_id');\n    }";
+                $modelContent .= "\n    public function {$relation}()\n    {\n";
+                $modelContent .= "        return \$this->hasMany(\\App\\Models\\{$attachModel}::class, '{$fk}_id');\n    }\n";
             }
         }
 
-        // belongsToMany pivot relations
+        // belongsToMany relations
         $addedRelations = [];
         foreach ($module->fields as $field) {
             if ($field->model_name && $field->is_multiple) {
                 $relatedModel = Str::singular($field->model_name);
                 $relatedTable = strtolower(Str::plural($relatedModel));
                 $relatedFk    = strtolower(Str::singular($relatedModel));
-
-                $tables = [$table, $relatedTable];
+                $tables       = [$table, $relatedTable];
                 sort($tables);
                 $pivot  = implode('_', $tables);
                 $method = Str::plural(Str::camel($relatedFk));
@@ -1182,14 +1228,20 @@ class ModulesController extends Controller
                 if (in_array($method, $addedRelations)) continue;
                 $addedRelations[] = $method;
 
-                $modelContent .= "\n\n    public function {$method}()\n    {\n        return \$this->belongsToMany(\n            \\App\\Models\\{$relatedModel}::class,\n            '{$pivot}',\n            '{$fk}_id',\n            '{$relatedFk}_id'\n        )->withTimestamps();\n    }";
+                $modelContent .= "\n    public function {$method}()\n    {\n";
+                $modelContent .= "        return \$this->belongsToMany(\n";
+                $modelContent .= "            \\App\\Models\\{$relatedModel}::class,\n";
+                $modelContent .= "            '{$pivot}',\n";
+                $modelContent .= "            '{$fk}_id',\n";
+                $modelContent .= "            '{$relatedFk}_id'\n";
+                $modelContent .= "        )->withTimestamps();\n    }\n";
             }
         }
 
-        $modelContent .= "\n}\n";
+        $modelContent .= "}\n";
         File::put(app_path("Models/{$modelName}.php"), $modelContent);
 
-        // ── G. Regenerate Controller File ───────────────────────────────────────
+        // ── G. Regenerate Controller ─────────────────────────────────────────────
         $controllerName = $modelName . 'Controller';
         $controllerDir  = app_path("Http/Controllers/Modules");
 
@@ -1197,53 +1249,32 @@ class ModulesController extends Controller
             File::makeDirectory($controllerDir, 0755, true);
         }
 
-        $controllerContent = <<<PHP
-        <?php
-
-        namespace App\Http\Controllers\Modules;
-
-        use App\Http\Controllers\Controller;
-        use App\Models\\{$modelName};
-        use Illuminate\Http\Request;
-
-        class {$controllerName} extends Controller
-        {
-            public function index(Request \$request)
-            {
-                \$data = {$modelName}::latest()->paginate(15);
-                return response()->json(['success' => true, 'data' => \$data]);
-            }
-
-            public function store(Request \$request)
-            {
-                \$record = {$modelName}::create(\$request->all());
-                return response()->json(['success' => true, 'data' => \$record], 201);
-            }
-
-            public function show(\$id)
-            {
-                \$record = {$modelName}::findOrFail(\$id);
-                return response()->json(['success' => true, 'data' => \$record]);
-            }
-
-            public function update(Request \$request, \$id)
-            {
-                \$record = {$modelName}::findOrFail(\$id);
-                \$record->update(\$request->all());
-                return response()->json(['success' => true, 'data' => \$record]);
-            }
-
-            public function destroy(\$id)
-            {
-                {$modelName}::findOrFail(\$id)->delete();
-                return response()->json(['success' => true, 'message' => 'Deleted successfully']);
-            }
-        }
-        PHP;
+        $controllerContent  = "<?php\n\nnamespace App\\Http\\Controllers\\Modules;\n\n";
+        $controllerContent .= "use App\\Http\\Controllers\\Controller;\n";
+        $controllerContent .= "use App\\Models\\{$modelName};\n";
+        $controllerContent .= "use Illuminate\\Http\\Request;\n\n";
+        $controllerContent .= "class {$controllerName} extends Controller\n{\n";
+        $controllerContent .= "    public function index(Request \$request)\n    {\n";
+        $controllerContent .= "        \$data = {$modelName}::latest()->paginate(15);\n";
+        $controllerContent .= "        return response()->json(['success' => true, 'data' => \$data]);\n    }\n\n";
+        $controllerContent .= "    public function store(Request \$request)\n    {\n";
+        $controllerContent .= "        \$record = {$modelName}::create(\$request->all());\n";
+        $controllerContent .= "        return response()->json(['success' => true, 'data' => \$record], 201);\n    }\n\n";
+        $controllerContent .= "    public function show(\$id)\n    {\n";
+        $controllerContent .= "        \$record = {$modelName}::findOrFail(\$id);\n";
+        $controllerContent .= "        return response()->json(['success' => true, 'data' => \$record]);\n    }\n\n";
+        $controllerContent .= "    public function update(Request \$request, \$id)\n    {\n";
+        $controllerContent .= "        \$record = {$modelName}::findOrFail(\$id);\n";
+        $controllerContent .= "        \$record->update(\$request->all());\n";
+        $controllerContent .= "        return response()->json(['success' => true, 'data' => \$record]);\n    }\n\n";
+        $controllerContent .= "    public function destroy(\$id)\n    {\n";
+        $controllerContent .= "        {$modelName}::findOrFail(\$id)->delete();\n";
+        $controllerContent .= "        return response()->json(['success' => true, 'message' => 'Deleted successfully']);\n    }\n";
+        $controllerContent .= "}\n";
 
         File::put("{$controllerDir}/{$controllerName}.php", $controllerContent);
 
-        // ── H. Module Directories ───────────────────────────────────────────────
+        // ── H. Module Directories ────────────────────────────────────────────────
         $fileService = new ModuleFileStructureService();
         $fileService->createModuleDirectories($module->slug);
         $fileService->createGitkeepFiles($module->slug);
@@ -1253,14 +1284,228 @@ class ModulesController extends Controller
     {
         $module     = Module::findOrFail($id);
         $moduleSlug = $module->slug;
+        $modelName  = $module->main_model_name;
+        $table      = strtolower(Str::plural($moduleSlug));
 
-        $module->delete(); // Cascades
+        // ── PHASE 1: DB Transaction ─────────────────────────────────────────────
+        try {
+            DB::beginTransaction();
 
-        // Clean up module directories
+            // 1. Module Permissions delete
+            $module->permissions()->delete();
+
+            // 2. Spatie permissions delete (sanctum guard)
+            $allPermissionActions = ['access', 'create', 'edit', 'show', 'delete'];
+            foreach ($allPermissionActions as $action) {
+                $permName   = $moduleSlug . '_' . $action;
+                $permission = Permission::where('name', $permName)
+                                ->where('guard_name', 'sanctum')
+                                ->first();
+
+                if ($permission) {
+                    // Roles thi permission detach karo
+                    $permission->roles()->detach();
+                    // Users thi permission detach karo
+                    $permission->users()->detach();
+                    // Permission delete karo
+                    $permission->delete();
+                }
+            }
+
+            // 3. Assignments detach
+            $module->assignedAdmins()->detach();
+            $module->assignedAgencies()->detach();
+
+            // 4. Fields + Options (cascade delete)
+            // Fields load karo file/pivot info mate — delete PEHLA
+            $fields = $module->fields()->with('columnType')->get();
+
+            $module->fields()->each(function ($field) {
+                $field->options()->delete();
+            });
+            $module->fields()->delete();
+
+            // 5. Module delete
+            $module->delete();
+
+            DB::commit();
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'success' => false,
+                'message' => 'DB Error: ' . $e->getMessage()
+            ], 500);
+        }
+
+        // ── PHASE 2: Schema + File Cleanup (Transaction BAHAR) ──────────────────
+        try {
+            $this->deleteModuleFiles($fields, $table, $moduleSlug, $modelName);
+        } catch (\Exception $e) {
+            // Module DB thi delete thai gayo, file cleanup warning aape
+            return response()->json([
+                'success' => true,
+                'message' => 'Module deleted successfully (cleanup warning: ' . $e->getMessage() . ')'
+            ]);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Module deleted successfully'
+        ]);
+    }
+
+    private function deleteModuleFiles($fields, $table, $moduleSlug, $modelName)
+    {
+        $fk = strtolower(Str::singular($moduleSlug));
+
+        // ── A. Drop Main Table ───────────────────────────────────────────────────
+        if (\Schema::hasTable($table)) {
+            \Schema::dropIfExists($table);
+        }
+
+        // ── B. Drop Multiple-File Attachment Tables ──────────────────────────────
+        foreach ($fields as $field) {
+            $inputType = $field->column_type_id ?? ($field->columnType->column_type_id ?? null);
+
+            if (in_array($inputType, [14, 15]) && $field->is_multiple) {
+                $attachTable = "{$table}_" . Str::plural($field->db_column);
+
+                if (\Schema::hasTable($attachTable)) {
+                    \Schema::dropIfExists($attachTable);
+                }
+            }
+        }
+
+        // ── C. Drop Pivot Tables ─────────────────────────────────────────────────
+        $droppedPivots = [];
+        foreach ($fields as $field) {
+            if ($field->model_name && $field->is_multiple) {
+                $relatedModel = Str::singular($field->model_name);
+                $relatedTable = strtolower(Str::plural($relatedModel));
+
+                $tables = [$table, $relatedTable];
+                sort($tables);
+                $pivot = implode('_', $tables);
+
+                if (in_array($pivot, $droppedPivots)) continue;
+                $droppedPivots[] = $pivot;
+
+                if (\Schema::hasTable($pivot)) {
+                    \Schema::dropIfExists($pivot);
+                }
+            }
+        }
+
+        // ── D. Delete All Related Migration Files ────────────────────────────────
+        $this->deleteModuleMigrationFiles($table, $fields);
+
+        // ── E. Delete Model File ─────────────────────────────────────────────────
+        $modelPath = app_path("Models/{$modelName}.php");
+        if (File::exists($modelPath)) {
+            File::delete($modelPath);
+        }
+
+        // ── F. Delete Controller File ────────────────────────────────────────────
+        $controllerPath = app_path("Http/Controllers/Modules/{$modelName}Controller.php");
+        if (File::exists($controllerPath)) {
+            File::delete($controllerPath);
+        }
+
+        // ── G. Delete Module Directories ─────────────────────────────────────────
         $fileService = new ModuleFileStructureService();
         $fileService->deleteModuleDirectories($moduleSlug);
+    }
 
-        return response()->json(['success' => true, 'message' => 'Module deleted successfully']);
+    private function deleteModuleMigrationFiles($table, $fields)
+    {
+        $migrationPath = database_path('migrations');
+        $deletedFiles  = [];
+        $skippedFiles  = [];
+
+        // ── Step 1: Collect all table names that belong to this module ───────────
+        $relatedTableNames = [];
+
+        // Main table
+        $relatedTableNames[] = $table;
+
+        // Attachment tables  (e.g. features_images, features_documents)
+        foreach ($fields as $field) {
+            $inputType = $field->column_type_id ?? ($field->columnType->column_type_id ?? null);
+
+            if (in_array($inputType, [14, 15]) && $field->is_multiple) {
+                $relatedTableNames[] = "{$table}_" . Str::plural($field->db_column);
+            }
+        }
+
+        // Pivot tables  (e.g. features_users, features_roles)
+        $addedPivots = [];
+        foreach ($fields as $field) {
+            if ($field->model_name && $field->is_multiple) {
+                $relatedModel = Str::singular($field->model_name);
+                $relatedTable = strtolower(Str::plural($relatedModel));
+
+                $tables = [$table, $relatedTable];
+                sort($tables);
+                $pivot = implode('_', $tables);
+
+                if (in_array($pivot, $addedPivots)) continue;
+                $addedPivots[] = $pivot;
+
+                $relatedTableNames[] = $pivot;
+            }
+        }
+
+        // ── Step 2: Get all migration files ──────────────────────────────────────
+        $allMigrationFiles = File::files($migrationPath);
+
+        foreach ($allMigrationFiles as $file) {
+            $filename = $file->getFilename();
+
+            // Migration filename pattern:
+            // 2024_01_01_000000_create_features.php
+            // 2024_01_01_000001_create_features_images.php
+            // 2024_01_01_000002_alter_features_sync_columns.php
+            // 2024_01_01_000003_alter_features_add_columns.php
+
+            foreach ($relatedTableNames as $relatedTable) {
+                $matched = false;
+
+                // CREATE migration  →  _create_{table}.php  or  _create_{table}_...
+                if (
+                    str_contains($filename, "_create_{$relatedTable}.php") ||
+                    str_contains($filename, "_create_{$relatedTable}_")
+                ) {
+                    $matched = true;
+                }
+
+                // ALTER migration  →  _alter_{table}_
+                if (str_contains($filename, "_alter_{$relatedTable}_")) {
+                    $matched = true;
+                }
+
+                if ($matched) {
+                    try {
+                        File::delete($file->getPathname());
+                        $deletedFiles[] = $filename;
+                    } catch (\Exception $e) {
+                        $skippedFiles[] = $filename . ' (' . $e->getMessage() . ')';
+                    }
+
+                    // Ek file ek j table mate match thay — next file par jao
+                    break;
+                }
+            }
+        }
+
+        // ── Step 3: Log deleted/skipped files (optional debug) ───────────────────
+        if (!empty($deletedFiles)) {
+            \Log::info("Module [{$table}] migration files deleted:", $deletedFiles);
+        }
+
+        if (!empty($skippedFiles)) {
+            \Log::warning("Module [{$table}] migration files could not be deleted:", $skippedFiles);
+        }
     }
 
     public function deleteField($id)
