@@ -57,15 +57,61 @@ class ModulesController extends Controller
     {
         if($request->type == 'menu'){
             $user = $request->user();
+            tenancy()->end();
+            
 
             $modules = Module::with(['permissions'])->where('status', true)->orderBy('order_number')->get();
 
-            $allowed = $modules->filter(fn($module) => $this->userCanAccessModule($module, $user));
+            $allowed = $modules;
+
+            if($user->user_type == 'tenant'){
+                $allowed = $modules;
+            }else{
+                $allowed = $modules->filter(fn($module) => $this->userCanAccessModule($module, $user));
+            }
 
             $tree  = [];
             $items = [];
 
             foreach ($allowed as $module) {
+                $permissions = [];
+                if($user->user_type != 'tenant'){
+                    if($module->created_by == $user->id){
+                        $permissions = [1,2,3,4,5];
+                    }else{
+                        $permissions = $module->permissions;
+                    }
+                }else{
+                    tenancy()->initialize($user->tenant_id);
+                        $module_permission = $user->roles()
+                        ->whereHas('permissions', function ($q) use ($module) {
+                            $q->where('name', 'like', $module->slug . '_%');
+                        })
+                        ->with(['permissions' => function ($q) use ($module) {
+                            $q->where('name', 'like', $module->slug . '_%');
+                        }])
+                        ->get()
+                        ->pluck('permissions')
+                        ->flatten()
+                        ->pluck('name')
+                        ->values();
+                        foreach($module_permission as $perm){
+                            if(str_contains($perm, '_access')){
+                                $permissions[] = 1;
+                            }elseif(str_contains($perm, '_create')){
+                                $permissions[] = 2;
+                            }elseif(str_contains($perm, '_edit')){
+                                $permissions[] = 3;
+                            }elseif(str_contains($perm, '_show')){
+                                $permissions[] = 4;
+                            }elseif(str_contains($perm, '_delete')){
+                                $permissions[] = 5;
+                            }
+
+                        }
+                    tenancy()->end();
+                }
+              
                 $items[$module->id] = [
                     'id'          => $module->id,
                     'menu_title'  => $module->menu_title,
@@ -73,7 +119,7 @@ class ModulesController extends Controller
                     'icon'        => $module->icon,
                     'order_number' => $module->order_number,
                     'parent_menu' => $module->parent_menu,
-                    'permissions' => $module->permissions,
+                    'permissions' => $permissions,
                     'children'    => [],
                 ];
             }
@@ -134,6 +180,10 @@ class ModulesController extends Controller
         // user_type restrictions
         if (! empty($module->user_type) && $module->user_type !== 'all' && $module->user_type !== $user->user_type) {
             return false;
+        }
+
+        if($module->created_by == $user->id){
+            return true;
         }
 
         $permissionName = $module->slug . '_access';
@@ -334,6 +384,21 @@ class ModulesController extends Controller
                         'guard_name' => 'sanctum'
                     ]);
                 }
+
+                if (!empty($moduleData['tenant_user_type'])) {
+
+                    if ($moduleData['tenant_user_type'] === 'all') {
+                        $roles = Role::all();
+                    }else{
+                        $roles = Role::whereIn('id', $moduleData['tenant_user_type'])->get();
+                    }
+                    foreach ($roles as $role) {
+                        if ($role) {
+                            $role->givePermissionTo($selectedPermissions);
+                        }
+                    }
+                }
+
              tenancy()->end();
         }
 
@@ -423,13 +488,14 @@ class ModulesController extends Controller
 
             elseif ($moduleData['user_type'] === 'all') {
 
-                $allTypeUser = User::where('user_type', 'agency')->orWhere('user_type', 'admin')->pluck('id')->toArray();
+                // ✅ Get users with roles in one query
+                $users = User::whereIn('user_type', ['agency', 'admin'])
+                    ->with('roles')
+                    ->get();
 
-                foreach ($allTypeUser as $allId) {
-                    $user = User::find($allId);
-                    $roles = $user->roles;
+                foreach ($users as $user) {
+                    foreach ($user->roles as $role) {
 
-                    foreach ($roles as $role) {
                         if ($role) {
                             $role->givePermissionTo($selectedPermissions);
                         }

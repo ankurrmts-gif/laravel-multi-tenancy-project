@@ -2,393 +2,949 @@
 
 namespace Modules\Master\Http\Controllers;
 
-use App\Models\Module;
+use App\Models\Module,App\Models\ModulePermission;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Storage;
+use App\Models\ColumnTypes;
 use Illuminate\Routing\Controller;
 
 class DynamicController extends Controller
 {
-    public function index($slug)
+    /*
+    |--------------------------------------------------
+    | GET MODULE
+    |--------------------------------------------------
+    */
+    private function getModule($slug)
     {
-        $module = Module::where('slug', $slug)->with('fields')->firstOrFail();
-        echo "<pre>"; print_r($module); die();
-        $tableName = $module->slug;
-
-        $records = DB::table($tableName)->get();
-        $records = $this->withRelationData($module, $records);
-
-        return response()->json(['data' => $records]);
+        tenancy()->end();
+        return Module::with('assignedAdmins', 'assignedAgencies', 'permissions')
+            ->where('slug', $slug)
+            ->firstOrFail();
     }
 
-    public function store(Request $request, $slug)
+    /*
+    |--------------------------------------------------
+    | CHECK + CREATE FOLDER
+    |--------------------------------------------------
+    */
+    private function ensureFolder($path)
     {
-        $module = Module::where('slug', $slug)->with('fields')->firstOrFail();
-        $tableName = $module->slug;
+        if (!Storage::exists($path)) {
+            Storage::makeDirectory($path);
+        }
+    }
 
-        if (!Schema::hasTable($tableName)) {
-            $this->createDynamicTable($module);
+    /*
+    |--------------------------------------------------
+    | HANDLE SINGLE FILE
+    |--------------------------------------------------
+    */
+    private function handleSingleFile($request, $table, $field)
+    {
+        if ($request->hasFile($field->db_column)) {
+
+            $folder = "public/{$table}";
+            $this->ensureFolder($folder);
+
+            return $request->file($field->db_column)
+                ->store($table, 'public');
         }
 
-        $data = [];
-        $multiFileItems = [];
+        return null;
+    }
+
+    /*
+    |--------------------------------------------------
+    | HANDLE MULTIPLE FILES
+    |--------------------------------------------------
+    */
+    private function handleMultipleFiles($request, $table, $fk, $field, $recordId)
+    {
+        if (!$request->hasFile($field->db_column)) {
+            return [];
+        }
+
+        $folder = "public/{$table}/{$field->db_column}";
+        $this->ensureFolder($folder);
+
+        $filesData = [];
+
+        foreach ($request->file($field->db_column) as $file) {
+            $filesData[] = [
+                "{$fk}_id" => $recordId,
+                'file_name' => $file->getClientOriginalName(),
+                'file_path' => $file->store("{$table}/{$field->db_column}", 'public'),
+                'mime_type' => $file->getMimeType(),
+                'file_size' => $file->getSize(),
+                'created_at' => now(),
+                'updated_at' => now(),
+            ];
+        }
+
+        return $filesData;
+    }
+
+    /*
+    |--------------------------------------------------
+    | HANDLE PIVOT
+    |--------------------------------------------------
+    */
+    private function handlePivot($request, $module, $recordId)
+    {
+        $table = Str::plural($module->slug);
+        $fk = Str::singular($module->slug);
 
         foreach ($module->fields as $field) {
-            $inputType = $field->columnType->input_type;
 
-            if (in_array($inputType, ['file', 'photo'])) {
-                if ($field->is_multiple) {
-                    if ($request->hasFile($field->db_column)) {
-                        $files = $request->file($field->db_column);
-                        foreach ($files as $file) {
-                            $fileName = time().'_'.preg_replace('/[^A-Za-z0-9_.-]/', '_', $file->getClientOriginalName());
-                            $destination = public_path("{$tableName}/{$field->db_column}");
-                            if (!file_exists($destination)) {
-                                mkdir($destination, 0755, true);
-                            }
-                            $file->move($destination, $fileName);
+            if ($field->model_name && $field->is_multiple) {
 
-                            $multiFileItems[$field->db_column][] = [
-                                'file_name' => $fileName,
-                                'file_path' => "{$tableName}/{$field->db_column}/{$fileName}",
-                                'mime_type' => $file->getClientMimeType(),
-                                'file_size' => $file->getSize(),
-                                'created_at' => now(),
-                                'updated_at' => now(),
-                            ];
-                        }
-                    }
+                $relatedTable = strtolower(Str::plural($field->model_name));
+                $relatedFk = strtolower(Str::singular($field->model_name));
 
-                    continue;
-                }
+                $tables = [$table, $relatedTable];
+                sort($tables);
 
-                if ($request->hasFile($field->db_column)) {
-                    $file = $request->file($field->db_column);
-                    $fileName = time() . '_' . preg_replace('/[^A-Za-z0-9_.-]/', '_', $file->getClientOriginalName());
-                    $destination = public_path("{$tableName}/{$field->db_column}");
-                    if (!file_exists($destination)) {
-                        mkdir($destination, 0755, true);
-                    }
-                    $file->move($destination, $fileName);
-                    $data[$field->db_column] = "{$tableName}/{$field->db_column}/{$fileName}";
-                    continue;
-                }
-            }
+                $pivot = implode('_', $tables);
 
-            if ($inputType === 'relation') {
-                if ($field->is_multiple) {
-                    // relation many-to-many: handled after main insert
-                    continue;
-                }
+                if ($request->has($field->db_column)) {
 
-                $value = $request->input($field->db_column);
-                if ($field->validation) {
-                    $validator = Validator::make([$field->db_column => $value], [$field->db_column => $field->validation]);
-                    if ($validator->fails()) {
-                        return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
+                    DB::table($pivot)->where("{$fk}_id", $recordId)->delete();
+
+                    foreach ($request->{$field->db_column} as $val) {
+                        DB::table($pivot)->insert([
+                            "{$fk}_id" => $recordId,
+                            "{$relatedFk}_id" => $val,
+                            'created_at' => now(),
+                            'updated_at' => now(),
+                        ]);
                     }
                 }
-
-                $data[$field->db_column] = $value;
-                continue;
-            }
-
-            $value = $request->input($field->db_column);
-            if ($field->validation) {
-                $validator = Validator::make([$field->db_column => $value], [$field->db_column => $field->validation]);
-                if ($validator->fails()) {
-                    return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
-                }
-            }
-            $data[$field->db_column] = $value;
-        }
-
-        $id = DB::table($tableName)->insertGetId($data);
-
-        foreach ($multiFileItems as $column => $items) {
-            foreach ($items as $item) {
-                $item["{$tableName}_id"] = $id;
-                DB::table("{$tableName}_{$column}")->insert($item);
             }
         }
-
-        foreach ($module->fields->filter(fn($f) => ((($f->columnType->input_type === 'relation') || !empty($f->model_name) || Str::endsWith($f->db_column, ['_ids','s'])) && $f->is_multiple)) as $field) {
-            $relatedIds = $request->input($field->db_column, []);
-            if (!is_array($relatedIds)) {
-                $relatedIds = explode(',', (string) $relatedIds);
-            }
-
-            $relatedModel = $field->model_name ?: Str::studly(Str::singular(preg_replace('/(_ids?$|s$)/', '', $field->db_column)));
-            $relatedTable = Str::plural(Str::snake($relatedModel));
-            $pivotTable = "{$tableName}_{$relatedTable}";
-            if (!Schema::hasTable($pivotTable)) {
-                $pivotTable = "{$tableName}_" . Str::singular($relatedTable);
-            }
-            $relatedKey = "{$relatedTable}_id";
-
-            foreach ($relatedIds as $relatedId) {
-                if (empty($relatedId)) {
-                    continue;
-                }
-
-                DB::table($pivotTable)->insertOrIgnore([
-                    "{$tableName}_id" => $id,
-                    $relatedKey => $relatedId,
-                    'created_at' => now(),
-                    'updated_at' => now(),
-                ]);
-            }
-        }
-
-        return response()->json(['success' => true, 'message' => 'Record created successfully', 'id' => $id]);
     }
 
-    public function show($slug, $id)
+    /*
+    |--------------------------------------------------
+    | INDEX
+    |--------------------------------------------------
+    */
+    public function index(Request $request, $slug)
     {
-        $module = Module::where('slug', $slug)->with('fields')->firstOrFail();
-        $tableName = $module->slug;
+        $user = auth()->user();
 
-        $record = DB::table($tableName)->find($id);
-        if (!$record) {
-            return response()->json(['success' => false, 'message' => 'Record not found'], 404);
+        // Get module
+        $module = $this->getModule($slug);
+
+        if($user->user_type != 'tenant'){
+             // ✅ Step 1: Check module-specific permissions
+            $modulePermissions = ModulePermission::where([
+                'module_id' => $module->id,
+                'user_id'   => $user->id
+            ])->get();
+
+            if ($modulePermissions->isNotEmpty()) {
+
+                // ✅ Use module permissions
+                $module_permission = $modulePermissions->pluck('permission_name'); 
+                // change column if your field name is different
+
+            } else {
+
+                // ✅ Fallback to role permissions
+                $module_permission = $user->roles()
+                ->whereHas('permissions', function ($q) use ($module) {
+                    $q->where('name', 'like', $module->slug . '_%');
+                })
+                ->with(['permissions' => function ($q) use ($module) {
+                    $q->where('name', 'like', $module->slug . '_%');
+                }])
+                ->get()
+                ->pluck('permissions')
+                ->flatten()
+                ->pluck('name')
+                ->values(); // assuming permission column = name
+            }
+        }else{
+
+            tenancy()->initialize($user->tenant_id);
+                // For tenant users, get permissions directly from roles
+                $module_permission = $user->roles()
+                    ->whereHas('permissions', function ($q) use ($module) {
+                        $q->where('name', 'like', $module->slug . '_%');
+                    })
+                    ->with(['permissions' => function ($q) use ($module) {
+                        $q->where('name', 'like', $module->slug . '_%');
+                    }])
+                    ->get()
+                    ->pluck('permissions')
+                    ->flatten()
+                    ->pluck('name')
+                    ->values(); // assuming permission column = name
+                    tenancy()->end();
         }
 
-        $record = $this->withRelationData($module, collect([$record]))->first();
+        // dynamic table name
+        $table = Str::plural($module->slug);
 
-        return response()->json(['success' => true, 'data' => $record]);
-    }
+        $query = DB::table($table);
 
-    public function edit($slug, $id)
-    {
-        $module = Module::where('slug', $slug)->with('fields')->firstOrFail();
-        $tableName = $module->slug;
-
-        $record = DB::table($tableName)->find($id);
-        if (!$record) {
-            return response()->json(['success' => false, 'message' => 'Record not found'], 404);
+        // Search filter
+        if ($request->filled('search')) {
+            $query->where('name', 'like', '%' . $request->search . '%');
         }
 
-        $record = $this->withRelationData($module, collect([$record]))->first();
+        // latest records
+        $data = $query->latest()->paginate(10);
 
+        // response
         return response()->json([
-            'success' => true,
-            'data' => [
-                'record' => $record,
-                'module' => [
-                    'id' => $module->id,
-                    'slug' => $module->slug,
-                    'model_name' => $module->model_name,
-                    'fields' => $module->fields,
-                ],
-            ],
+            'data' => $data,
+            'action' => $module->actions,
+            'module_permission' => $module_permission
         ]);
     }
 
-    public function update(Request $request, $slug, $id)
+    //create 
+    public function create(Request $request,$slug)
     {
-        $module = Module::where('slug', $slug)->with('fields')->firstOrFail();
-        $tableName = $module->slug;
+        //echo "<pre>"; print_r($request->user()); die();
+        tenancy()->end();
+        $module = $this->getModule($slug);
+
+        $response = [
+            'module' => $module,
+            'fields' => []
+        ];
+
+        foreach ($module->fields as $field) {
+
+            $inputType = $field->column_type_id ?? $field->columnType->column_type_id;
+
+            $fieldData = [
+                'name' => $field->db_column,
+                'label' => $field->label,
+                'type' => $this->mapFieldType($inputType),
+                'is_multiple' => (bool) $field->is_multiple,
+                'validation' => $field->validation,
+                'tooltip_text' => $field->tooltip_text,
+                'is_ckeditor' => $field->is_ckeditor,
+                'default_value' => $field->default_value,
+                'is_multiple' => $field->is_multiple,
+                'max_file_size' => $field->max_file_size,
+                'order_number' => $field->order_number,
+                'visibility' => $field->visibility,
+                'is_checked' => $field->is_checked,
+            ];
+
+            /*
+            |--------------------------------------------------
+            | STATIC SELECT OPTIONS
+            |--------------------------------------------------
+            */
+            if (($inputType == 5 || $inputType == 6) && !$field->model_name) {
+
+                $options = DB::table('module_field_options')
+                    ->where('module_field_id', $field->id)
+                    ->get(['option_label', 'option_value']);
+
+                $fieldData['options'] = $options;
+            }
+
+            /*
+            |--------------------------------------------------
+            | DYNAMIC SELECT OPTIONS (RELATION)
+            |--------------------------------------------------
+            */
+            if ($field->model_name) {
+
+                $relatedTable = strtolower(Str::plural($field->model_name));
+
+                $options = DB::table($relatedTable)->get();
+
+                $fieldData['options'] = $options;
+            }
+
+            $response['fields'][] = $fieldData;
+        }
+
+        return response()->json($response);
+    }
+
+    private function mapFieldType($type)
+    {
+       $columnType = ColumnTypes::find($type);
+
+        return $columnType?->input_type;
+    }
+
+    /*
+    |--------------------------------------------------
+    | STORE
+    |--------------------------------------------------
+    */
+    public function store(Request $request, $slug)
+    {
+        //echo "<pre>"; print_r($request->all()); echo "</pre>"; exit;
+        $module = $this->getModule($slug);
+        $table = Str::plural($module->slug);
+        $fk = Str::singular($module->slug);
 
         $data = [];
+
         foreach ($module->fields as $field) {
-            $inputType = $field->columnType->input_type;
 
-            if (in_array($inputType, ['file', 'photo'])) {
-                if ($field->is_multiple) {
-                    if ($request->hasFile($field->db_column)) {
-                        foreach ($request->file($field->db_column) as $file) {
-                            $fileName = time() . '_' . preg_replace('/[^A-Za-z0-9_.-]/', '_', $file->getClientOriginalName());
-                            $destination = public_path("{$tableName}/{$field->db_column}");
-                            if (!file_exists($destination)) {
-                                mkdir($destination, 0755, true);
-                            }
-                            $file->move($destination, $fileName);
+            $inputType = $field->column_type_id ?? $field->columnType->column_type_id;
 
-                            DB::table("{$tableName}_{$field->db_column}")->insert([
-                                "{$tableName}_id" => $id,
-                                'file_name' => $fileName,
-                                'file_path' => "{$tableName}/{$field->db_column}/{$fileName}",
-                                'mime_type' => $file->getClientMimeType(),
-                                'file_size' => $file->getSize(),
-                                'created_at' => now(),
-                                'updated_at' => now(),
-                            ]);
-                        }
+            // FILES
+            if (in_array($inputType, [14,15])) {
+
+                if (!$field->is_multiple) {
+                    $file = $this->handleSingleFile($request, $table, $field);
+                    if ($file) {
+                        $data[$field->db_column] = $file;
                     }
-                    continue;
                 }
+
+                continue;
+            }
+
+            // NORMAL
+            if (!$field->is_multiple) {
+                $data[$field->db_column] = $request->{$field->db_column};
+            }
+        }
+
+        $id = DB::table($table)->insertGetId($data);
+
+        /*
+        | MULTIPLE FILES
+        */
+        foreach ($module->fields as $field) {
+
+            $inputType = $field->column_type_id ?? $field->columnType->column_type_id;
+
+            if (in_array($inputType, [14,15]) && $field->is_multiple) {
+
+                $filesData = $this->handleMultipleFiles($request, $table, $fk, $field, $id);
+
+                if (!empty($filesData)) {
+                    $attachTable = "{$table}_" . Str::plural($field->db_column);
+                    DB::table($attachTable)->insert($filesData);
+                }
+            }
+        }
+
+        /*
+        | PIVOT
+        */
+        $this->handlePivot($request, $module, $id);
+
+        return response()->json(['message' => 'Created', 'id' => $id]);
+    }
+
+    /*
+    |--------------------------------------------------
+    | SHOW
+    |--------------------------------------------------
+    */
+    public function show($slug, $id)
+    {
+        $module = $this->getModule($slug);
+        $table = Str::plural($module->slug);
+        $fk = Str::singular($module->slug);
+
+        // Main data
+        $data = DB::table($table)->where('id', $id)->first();
+
+        if (!$data) {
+            return response()->json(['message' => 'Not found'], 404);
+        }
+
+        $response = [
+            'data' => (array) $data,
+            'relations' => []
+        ];
+
+        /*
+        |--------------------------------------------------
+        | HANDLE RELATIONS (DROPDOWN + SELECTED)
+        |--------------------------------------------------
+        */
+        foreach ($module->fields as $field) {
+
+            /*
+            |------------------------------------------
+            | MANY TO MANY (MULTI SELECT)
+            |------------------------------------------
+            */
+            if ($field->model_name && $field->is_multiple) {
+
+                $relatedTable = strtolower(Str::plural($field->model_name));
+                $relatedFk = strtolower(Str::singular($field->model_name));
+
+                $tables = [$table, $relatedTable];
+                sort($tables);
+                $pivot = implode('_', $tables);
+
+                // All options
+                $options = DB::table($relatedTable)->get();
+
+                // Selected IDs
+                $selected = DB::table($pivot)
+                    ->where("{$fk}_id", $id)
+                    ->pluck("{$relatedFk}_id")
+                    ->toArray();
+
+                $response['relations'][$field->db_column] = [
+                    'type' => 'multi_select',
+                    'options' => $options,
+                    'selected' => $selected
+                ];
+            }
+
+            /*
+            |------------------------------------------
+            | BELONGS TO (SINGLE SELECT)
+            |------------------------------------------
+            */
+            elseif ($field->model_name && !$field->is_multiple) {
+
+                $relatedTable = strtolower(Str::plural($field->model_name));
+
+                $options = DB::table($relatedTable)->get();
+
+                $selected = $data->{$field->db_column} ?? null;
+
+                $response['relations'][$field->db_column] = [
+                    'type' => 'single_select',
+                    'options' => $options,
+                    'selected' => $selected
+                ];
+            }
+        }
+
+        /*
+        |--------------------------------------------------
+        | FILES (OPTIONAL - FOR PREVIEW)
+        |--------------------------------------------------
+        */
+        foreach ($module->fields as $field) {
+
+            $inputType = $field->column_type_id ?? ($field->columnType->column_type_id ?? null);
+
+            if (in_array($inputType, [14,15]) && $field->is_multiple) {
+
+                $attachTable = "{$table}_" . Str::plural($field->db_column);
+
+                $files = DB::table($attachTable)
+                    ->where("{$fk}_id", $id)
+                    ->get()
+                    ->map(function ($file) {
+                        $file->file_url = url('storage/' . $file->file_path);
+                        return $file;
+                    });
+
+                $response['data'][$field->db_column] = $files;
+            }
+
+            // Single image URL
+            if (in_array($inputType, [14,15]) && !$field->is_multiple && !empty($data->{$field->db_column})) {
+                $response['data'][$field->db_column . '_url'] = url('storage/' . $data->{$field->db_column});
+            }
+
+            if (in_array($inputType, [5,6])) {
+
+                $options = DB::table('module_field_options')->where('module_field_id', $field->id)->get();
+
+                $selected = $data->{$field->db_column} ?? null;
+
+                $response['data'][$field->db_column] = [
+                    'options' => $options,
+                    'selected' => $selected
+                ];
+            }
+        }
+
+        return response()->json($response);
+    }
+
+    //Edit
+
+    public function edit($slug, $id)
+    {
+        $module = $this->getModule($slug);
+        $table = Str::plural($module->slug);
+        $fk = Str::singular($module->slug);
+
+        $data = DB::table($table)->where('id', $id)->first();
+
+        if (!$data) {
+            return response()->json(['message' => 'Not found'], 404);
+        }
+
+        $response = [
+            'module' => $module,
+            'fields' => []
+        ];
+
+        foreach ($module->fields as $field) {
+
+            $inputType = $field->column_type_id ?? $field->columnType->column_type_id;
+
+            $fieldData = [
+                'name' => $field->db_column,
+                'label' => $field->label,
+                'type' => $field->columnType->input_type ?? 'text',
+                'validation' => $field->validation,
+                'tooltip_text' => $field->tooltip_text,
+                'is_ckeditor' => $field->is_ckeditor,
+                'default_value' => $field->default_value,
+                'is_multiple' => (bool) $field->is_multiple,
+                'max_file_size' => $field->max_file_size,
+                'order_number' => $field->order_number,
+                'visibility' => $field->visibility,
+                'is_checked' => $field->is_checked,
+                'value' => null
+            ];
+
+            /*
+            |------------------------------------------
+            | STATIC SELECT (STATUS, TAGS, ETC)
+            |------------------------------------------
+            */
+            if ($inputType == 3 && !$field->model_name) {
+
+                $options = DB::table('module_field_options')
+                    ->where('module_field_id', $field->id)
+                    ->get(['option_label', 'option_value']);
+
+                $fieldData['options'] = $options;
+
+                $fieldData['value'] = $field->is_multiple
+                    ? json_decode($data->{$field->db_column}, true)
+                    : $data->{$field->db_column};
+
+                $response['fields'][] = $fieldData;
+                continue;
+            }
+
+            if (in_array($inputType, [5,6])) {
+
+                $options = DB::table('module_field_options')->where('module_field_id', $field->id)->get();
+
+                $selected = $data->{$field->db_column} ?? null;
+
+                 $options = DB::table('module_field_options')
+                    ->where('module_field_id', $field->id)
+                    ->get(['option_label', 'option_value']);
+
+                $fieldData['options'] = $options;
+
+                $fieldData['value'] = $selected;
+
+                $response['fields'][] = $fieldData;
+                continue;
+            }
+
+            /*
+            |------------------------------------------
+            | DYNAMIC SELECT (RELATION)
+            |------------------------------------------
+            */
+            if ($field->model_name) {
+
+                $relatedTable = strtolower(Str::plural($field->model_name));
+                $relatedFk = strtolower(Str::singular($field->model_name));
+
+                $options = DB::table($relatedTable)->get();
+                $fieldData['options'] = $options;
+
+                if ($field->is_multiple) {
+
+                    $tables = [$table, $relatedTable];
+                    sort($tables);
+                    $pivot = implode('_', $tables);
+
+                    $selected = DB::table($pivot)
+                        ->where("{$fk}_id", $id)
+                        ->pluck("{$relatedFk}_id")
+                        ->toArray();
+
+                    $fieldData['value'] = $selected;
+
+                } else {
+                    $fieldData['value'] = $data->{$field->db_column};
+                }
+
+                $response['fields'][] = $fieldData;
+                continue;
+            }
+
+            /*
+            |------------------------------------------
+            | MULTIPLE FILES / IMAGES
+            |------------------------------------------
+            */
+            if (in_array($inputType, [14,15]) && $field->is_multiple) {
+
+                $attachTable = "{$table}_" . Str::plural($field->db_column);
+
+                $files = DB::table($attachTable)
+                    ->where("{$fk}_id", $id)
+                    ->get()
+                    ->map(function ($file) {
+                        return [
+                            'id' => $file->id,
+                            'name' => $file->file_name,
+                            'path' => $file->file_path,
+                            'url' => url('storage/' . $file->file_path)
+                        ];
+                    });
+
+                $fieldData['value'] = $files;
+
+                $response['fields'][] = $fieldData;
+                continue;
+            }
+
+            /*
+            |------------------------------------------
+            | SINGLE FILE / IMAGE
+            |------------------------------------------
+            */
+            if (in_array($inputType, [14,15]) && !$field->is_multiple) {
+
+                if (!empty($data->{$field->db_column})) {
+                    $fieldData['value'] = [
+                        'path' => $data->{$field->db_column},
+                        'url' => url('storage/' . $data->{$field->db_column})
+                    ];
+                }
+
+                $response['fields'][] = $fieldData;
+                continue;
+            }
+
+            /*
+            |------------------------------------------
+            | NORMAL FIELD (TEXT, NUMBER, ETC)
+            |------------------------------------------
+            */
+            if ($field->is_multiple && $inputType == 3) {
+                $fieldData['value'] = json_decode($data->{$field->db_column}, true);
+            } else {
+                $fieldData['value'] = $data->{$field->db_column};
+            }
+
+            $response['fields'][] = $fieldData;
+        }
+
+        return response()->json($response);
+    }
+
+    /*
+    |--------------------------------------------------
+    | UPDATE
+    |--------------------------------------------------
+    */
+    public function update(Request $request, $slug)
+    {
+        $module = $this->getModule($slug);
+        $table  = Str::plural($module->slug);
+        $fk     = Str::singular($module->slug);
+        $id     = $request->id;
+
+        $data = [];
+
+        /*
+        |--------------------------------------------------
+        | MAIN TABLE UPDATE (NORMAL + SINGLE FILE)
+        |--------------------------------------------------
+        */
+        foreach ($module->fields as $field) {
+
+            $inputType = $field->column_type_id ?? $field->columnType->column_type_id;
+
+            /*
+            |------------------------------------------
+            | SINGLE FILE / IMAGE
+            |------------------------------------------
+            */
+            if (in_array($inputType, [14,15]) && !$field->is_multiple) {
 
                 if ($request->hasFile($field->db_column)) {
-                    $file = $request->file($field->db_column);
-                    $data[$field->db_column] = $file->store("public/{$tableName}/{$field->db_column}");
-                    continue;
+
+                    // 🔥 DELETE OLD FILE
+                    $oldFile = DB::table($table)
+                        ->where('id', $id)
+                        ->value($field->db_column);
+
+                    if ($oldFile && Storage::disk('public')->exists($oldFile)) {
+                        Storage::disk('public')->delete($oldFile);
+                    }
+
+                    // 🔥 UPLOAD NEW FILE
+                    $path = $request->file($field->db_column)
+                        ->store($table, 'public');
+
+                    $data[$field->db_column] = $path;
                 }
 
-                $value = $request->input($field->db_column);
-                if ($field->validation) {
-                    $validator = Validator::make([$field->db_column => $value], [$field->db_column => $field->validation]);
-                    if ($validator->fails()) {
-                        return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
-                    }
-                }
-                $data[$field->db_column] = $value;
                 continue;
             }
 
-            if ($inputType === 'relation') {
-                if ($field->is_multiple) {
-                    // relation many-to-many updates are processed after main record update
-                    continue;
-                }
+            /*
+            |------------------------------------------
+            | STATIC MULTI SELECT (JSON)
+            |------------------------------------------
+            */
+            if ($field->is_multiple && !$field->model_name && $inputType == 3) {
 
-                $value = $request->input($field->db_column);
-                if ($field->validation) {
-                    $validator = Validator::make([$field->db_column => $value], [$field->db_column => $field->validation]);
-                    if ($validator->fails()) {
-                        return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
-                    }
-                }
-                $data[$field->db_column] = $value;
+                $data[$field->db_column] = json_encode(
+                    $request->{$field->db_column} ?? []
+                );
+
                 continue;
             }
 
-            $value = $request->input($field->db_column);
-            if ($field->validation) {
-                $validator = Validator::make([$field->db_column => $value], [$field->db_column => $field->validation]);
-                if ($validator->fails()) {
-                    return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
+            /*
+            |------------------------------------------
+            | NORMAL FIELD
+            |------------------------------------------
+            */
+            if (!$field->is_multiple && !$field->model_name) {
+
+                $data[$field->db_column] = $request->{$field->db_column};
+            }
+        }
+
+        // ✅ UPDATE MAIN TABLE
+        DB::table($table)->where('id', $id)->update($data);
+
+        /*
+        |--------------------------------------------------
+        | MULTIPLE FILES (DELETE ONLY IF NEW UPLOADED)
+        |--------------------------------------------------
+        */
+        foreach ($module->fields as $field) {
+
+            $inputType = $field->column_type_id ?? $field->columnType->column_type_id;
+
+            if (in_array($inputType, [14,15]) && $field->is_multiple) {
+
+                $attachTable = "{$table}_" . Str::plural($field->db_column);
+
+                // ✅ Get uploaded files (handles photos[])
+                $files = $request->file($field->db_column);
+
+                if (!empty($files)) {
+
+                    /*
+                    |------------------------------------------
+                    | DELETE OLD FILES FROM STORAGE
+                    |------------------------------------------
+                    */
+                    $oldFiles = DB::table($attachTable)
+                        ->where("{$fk}_id", $id)
+                        ->get();
+
+                    foreach ($oldFiles as $file) {
+
+                        if (!empty($file->file_path) &&
+                            Storage::disk('public')->exists($file->file_path)) {
+
+                            Storage::disk('public')->delete($file->file_path);
+                        }
+                    }
+
+                    /*
+                    |------------------------------------------
+                    | DELETE OLD DB RECORDS
+                    |------------------------------------------
+                    */
+                    DB::table($attachTable)
+                        ->where("{$fk}_id", $id)
+                        ->delete();
+
+                    /*
+                    |------------------------------------------
+                    | INSERT NEW FILES
+                    |------------------------------------------
+                    */
+                    $filesData = [];
+
+                    foreach ($files as $file) {
+
+                        $path = $file->store($table . '/' . $field->db_column, 'public');
+
+                        $filesData[] = [
+                            "{$fk}_id" => $id,
+                            'file_name' => $file->getClientOriginalName(),
+                            'file_path' => $path,
+                            'mime_type' => $file->getClientMimeType(),
+                            'file_size' => $file->getSize(),
+                            'created_at' => now(),
+                            'updated_at' => now(),
+                        ];
+                    }
+
+                    if (!empty($filesData)) {
+                        DB::table($attachTable)->insert($filesData);
+                    }
                 }
             }
-            $data[$field->db_column] = $value;
         }
 
-        DB::table($tableName)->where('id', $id)->update($data);
+        /*
+        |--------------------------------------------------
+        | PIVOT (MANY TO MANY)
+        |--------------------------------------------------
+        */
+        foreach ($module->fields as $field) {
 
-                foreach ($module->fields->filter(fn($f) => ((($f->columnType->input_type === 'relation') || !empty($f->model_name) || Str::endsWith($f->db_column, ['_ids','s'])) && $f->is_multiple)) as $field) {
-            $relatedIds = $request->input($field->db_column, []);
-            if (!is_array($relatedIds)) {
-                $relatedIds = explode(',', (string) $relatedIds);
-            }
+            if ($field->model_name && $field->is_multiple) {
 
-            $relatedModel = $field->model_name ?: Str::studly(Str::singular(preg_replace('/(_ids?$|s$)/', '', $field->db_column)));
-            $relatedTable = Str::plural(Str::snake($relatedModel));
-            $pivotTable = "{$tableName}_{$relatedTable}";
-            if (!Schema::hasTable($pivotTable)) {
-                $pivotTable = "{$tableName}_" . Str::singular($relatedTable);
-            }
-            $relatedKey = "{$relatedTable}_id";
+                $relatedTable = strtolower(Str::plural($field->model_name));
+                $relatedFk    = strtolower(Str::singular($field->model_name));
 
-            // remove existing relations if full sync
-            DB::table($pivotTable)->where("{$tableName}_id", $id)->delete();
+                $tables = [$table, $relatedTable];
+                sort($tables);
+                $pivot = implode('_', $tables);
 
-            foreach ($relatedIds as $relatedId) {
-                if (empty($relatedId)) continue;
+                // 🔥 DELETE OLD
+                DB::table($pivot)
+                    ->where("{$fk}_id", $id)
+                    ->delete();
 
-                DB::table($pivotTable)->insertOrIgnore([
-                    "{$tableName}_id" => $id,
-                    $relatedKey => $relatedId,
-                    'created_at' => now(),
-                    'updated_at' => now(),
-                ]);
+                // 🔥 INSERT NEW
+                $values = $request->{$field->db_column} ?? [];
+
+                $insertData = [];
+
+                foreach ($values as $val) {
+                    $insertData[] = [
+                        "{$fk}_id" => $id,
+                        "{$relatedFk}_id" => $val,
+                        'created_at' => now(),
+                        'updated_at' => now(),
+                    ];
+                }
+
+                if (!empty($insertData)) {
+                    DB::table($pivot)->insert($insertData);
+                }
             }
         }
 
-        return response()->json(['success' => true, 'message' => 'Record updated successfully']);
+        return response()->json([
+            'message' => 'Updated successfully'
+        ]);
     }
 
+    /*
+    |--------------------------------------------------
+    | DELETE
+    |--------------------------------------------------
+    */
     public function destroy($slug, $id)
     {
-        $module = Module::where('slug', $slug)->firstOrFail();
-        $tableName = $module->slug;
+        $module = $this->getModule($slug);
+        $table  = Str::plural($module->slug);
+        $fk     = Str::singular($module->slug);
 
-        DB::table($tableName)->delete($id);
-        return response()->json(['success' => true, 'message' => 'Record deleted successfully']);
-    }
+        $data = DB::table($table)->where('id', $id)->first();
 
-    private function withRelationData($module, $records)
-    {
-        if ($records->isEmpty()) {
-            return $records;
+        if (!$data) {
+            return response()->json(['message' => 'Not found'], 404);
         }
 
-        $tableName = $module->slug;
-        $primaryIds = $records->pluck('id')->toArray();
+        /*
+        |--------------------------------------------------
+        | DELETE FILES (SINGLE + MULTIPLE)
+        |--------------------------------------------------
+        */
+        foreach ($module->fields as $field) {
 
-        foreach ($module->fields->where('columnType.input_type', 'relation') as $field) {
-            $relatedModel = $field->model_name ?: Str::studly(Str::singular(preg_replace('/(_ids?$|s$)/', '', $field->db_column)));
-            $relatedTable = Str::plural(Str::snake($relatedModel));
+            $inputType = $field->column_type_id ?? $field->columnType->column_type_id;
 
-            if ($field->is_multiple) {
-                $pivotTable = "{$tableName}_{$relatedTable}";
-                if (!Schema::hasTable($pivotTable)) {
-                    $pivotTable = "{$tableName}_" . Str::singular($relatedTable);
+            /*
+            |------------------------------------------
+            | SINGLE FILE
+            |------------------------------------------
+            */
+            if (in_array($inputType, [14,15]) && !$field->is_multiple) {
+
+                $filePath = $data->{$field->db_column};
+
+                if (!empty($filePath) && Storage::disk('public')->exists($filePath)) {
+                    Storage::disk('public')->delete($filePath);
                 }
-                $relatedKey = "{$relatedTable}_id";
-                $masterKey = "{$tableName}_id";
+            }
 
-                $pivotRows = DB::table($pivotTable)
-                    ->whereIn($masterKey, $primaryIds)
+            /*
+            |------------------------------------------
+            | MULTIPLE FILES
+            |------------------------------------------
+            */
+            if (in_array($inputType, [14,15]) && $field->is_multiple) {
+
+                $attachTable = "{$table}_" . Str::plural($field->db_column);
+
+                $files = DB::table($attachTable)
+                    ->where("{$fk}_id", $id)
                     ->get();
 
-                $relatedIdsByMaster = [];
-                foreach ($pivotRows as $pivotRow) {
-                    $relatedIdsByMaster[$pivotRow->{$masterKey}][] = $pivotRow->{$relatedKey};
-                }
+                // 🔥 DELETE FILES FROM STORAGE
+                foreach ($files as $file) {
+                    if (!empty($file->file_path) &&
+                        Storage::disk('public')->exists($file->file_path)) {
 
-                foreach ($records as $record) {
-                    $record->{$field->db_column} = $relatedIdsByMaster[$record->id] ?? [];
-                }
-
-                // Fetch joined related records for convenience
-                $allRelatedIds = array_unique(array_merge([], ...array_values($relatedIdsByMaster)));
-                if (!empty($allRelatedIds)) {
-                    $relatedRows = DB::table($relatedTable)->whereIn('id', $allRelatedIds)->get()->keyBy('id');
-                    foreach ($records as $record) {
-                        $record->{$field->db_column . '_data'} = collect($record->{$field->db_column})->map(function ($relId) use ($relatedRows) {
-                            return $relatedRows[$relId] ?? null;
-                        })->filter()->values();
-                    }
-                } else {
-                    foreach ($records as $record) {
-                        $record->{$field->db_column . '_data'} = collect([]);
+                        Storage::disk('public')->delete($file->file_path);
                     }
                 }
 
-            } else {
-                $relatedFk = $field->db_column;
-                $foreignIds = $records->pluck($relatedFk)->filter()->unique()->toArray();
-
-                $relatedRows = DB::table($relatedTable)->whereIn('id', $foreignIds)->get()->keyBy('id');
-
-                foreach ($records as $record) {
-                    $record->{$field->db_column . '_data'} = $relatedRows[$record->{$relatedFk}] ?? null;
-                }
+                // 🔥 DELETE DB RECORDS
+                DB::table($attachTable)
+                    ->where("{$fk}_id", $id)
+                    ->delete();
             }
         }
 
-        foreach ($module->fields->whereIn('columnType.input_type', ['file', 'photo']) as $field) {
-            if (!$field->is_multiple) {
-                continue;
-            }
+        /*
+        |--------------------------------------------------
+        | DELETE PIVOT (MANY TO MANY)
+        |--------------------------------------------------
+        */
+        foreach ($module->fields as $field) {
 
-            $attachmentTable = "{$tableName}_{$field->db_column}";
-            if (!Schema::hasTable($attachmentTable)) {
-                continue;
-            }
+            if ($field->model_name && $field->is_multiple) {
 
-            $attachments = DB::table($attachmentTable)
-                ->whereIn("{$tableName}_id", $primaryIds)
-                ->get()
-                ->groupBy("{$tableName}_id");
+                $relatedTable = strtolower(Str::plural($field->model_name));
 
-            foreach ($records as $record) {
-                $record->{$field->db_column} = $attachments[$record->id] ?? collect([]);
+                $tables = [$table, $relatedTable];
+                sort($tables);
+                $pivot = implode('_', $tables);
+
+                DB::table($pivot)
+                    ->where("{$fk}_id", $id)
+                    ->delete();
             }
         }
 
-        return $records;
+        /*
+        |--------------------------------------------------
+        | DELETE MAIN RECORD
+        |--------------------------------------------------
+        */
+        DB::table($table)->where('id', $id)->delete();
+
+        return response()->json([
+            'message' => 'Deleted successfully'
+        ]);
     }
 }

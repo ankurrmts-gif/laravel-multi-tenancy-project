@@ -140,39 +140,52 @@ class DynamicController extends Controller
         // Get module
         $module = $this->getModule($slug);
 
-        // ✅ Step 1: Check module-specific permissions
-        $modulePermissions = ModulePermission::where([
-            'module_id' => $module->id,
-            'user_id'   => $user->id
-        ])->get();
+        if($user->user_type != 'tenant'){
+             // ✅ Step 1: Check module-specific permissions
+            $modulePermissions = ModulePermission::where([
+                'module_id' => $module->id,
+                'user_id'   => $user->id
+            ])->get();
 
-        if ($modulePermissions->isNotEmpty()) {
+            if ($modulePermissions->isNotEmpty()) {
 
-            // ✅ Use module permissions
-            $module_permission = $modulePermissions->pluck('permission_name'); 
-            // change column if your field name is different
+                // ✅ Use module permissions
+                $module_permission = $modulePermissions->pluck('permission_name'); 
+                // change column if your field name is different
 
-        } else {
+            } else {
 
-            if($request->filled('tenant_id')){
-                $tenant_id = $request->tenant_id;
-                tenancy()->initialize($tenant_id);
+                // ✅ Fallback to role permissions
+                $module_permission = $user->roles()
+                ->whereHas('permissions', function ($q) use ($module) {
+                    $q->where('name', 'like', $module->slug . '_%');
+                })
+                ->with(['permissions' => function ($q) use ($module) {
+                    $q->where('name', 'like', $module->slug . '_%');
+                }])
+                ->get()
+                ->pluck('permissions')
+                ->flatten()
+                ->pluck('name')
+                ->values(); // assuming permission column = name
             }
-            // ✅ Fallback to role permissions
-            $module_permission = $user->roles()
-            ->whereHas('permissions', function ($q) use ($module) {
-                $q->where('name', 'like', $module->slug . '_%');
-            })
-            ->with(['permissions' => function ($q) use ($module) {
-                $q->where('name', 'like', $module->slug . '_%');
-            }])
-            ->get()
-            ->pluck('permissions')
-            ->flatten()
-            ->pluck('name')
-            ->values(); // assuming permission column = name
+        }else{
 
-            tenancy()->end();
+            tenancy()->initialize($user->tenant_id);
+                // For tenant users, get permissions directly from roles
+                $module_permission = $user->roles()
+                    ->whereHas('permissions', function ($q) use ($module) {
+                        $q->where('name', 'like', $module->slug . '_%');
+                    })
+                    ->with(['permissions' => function ($q) use ($module) {
+                        $q->where('name', 'like', $module->slug . '_%');
+                    }])
+                    ->get()
+                    ->pluck('permissions')
+                    ->flatten()
+                    ->pluck('name')
+                    ->values(); // assuming permission column = name
+                    tenancy()->end();
         }
 
         // dynamic table name

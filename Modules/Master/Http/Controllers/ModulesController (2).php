@@ -6,7 +6,7 @@ use App\Models\ModuleField;
 use App\Models\ModuleFieldOption;
 use App\Models\ModulePermission;
 use App\Models\Role;
-use App\Models\User;
+use App\Models\User,App\Models\Tenant,App\Models\CentralTenantTelations;
 use App\Services\ModuleFileStructureService;
 use DB;
 use Illuminate\Http\Request;
@@ -56,22 +56,70 @@ class ModulesController extends Controller
     public function index(Request $request)
     {
         if($request->type == 'menu'){
-            $user = auth()->user();
+            $user = $request->user();
+            tenancy()->end();
+            
 
-            $modules = Module::where('status', true)->orderBy('order_number')->get();
+            $modules = Module::with(['permissions'])->where('status', true)->orderBy('order_number')->get();
 
-            $allowed = $modules->filter(fn($module) => $this->userCanAccessModule($module, $user));
+            $allowed = $modules;
+
+            if($user->user_type == 'tenant'){
+                $allowed = $modules;
+            }else{
+                $allowed = $modules->filter(fn($module) => $this->userCanAccessModule($module, $user));
+            }
 
             $tree  = [];
             $items = [];
 
             foreach ($allowed as $module) {
+                $permissions = [];
+                if($user->user_type != 'tenant'){
+                    if($module->created_by == $user->id){
+                        $permissions = [1,2,3,4,5];
+                    }else{
+                        $permissions = $module->permissions;
+                    }
+                }else{
+                    tenancy()->initialize($user->tenant_id);
+                        $module_permission = $user->roles()
+                        ->whereHas('permissions', function ($q) use ($module) {
+                            $q->where('name', 'like', $module->slug . '_%');
+                        })
+                        ->with(['permissions' => function ($q) use ($module) {
+                            $q->where('name', 'like', $module->slug . '_%');
+                        }])
+                        ->get()
+                        ->pluck('permissions')
+                        ->flatten()
+                        ->pluck('name')
+                        ->values();
+                        foreach($module_permission as $perm){
+                            if(str_contains($perm, '_access')){
+                                $permissions[] = 1;
+                            }elseif(str_contains($perm, '_create')){
+                                $permissions[] = 2;
+                            }elseif(str_contains($perm, '_edit')){
+                                $permissions[] = 3;
+                            }elseif(str_contains($perm, '_show')){
+                                $permissions[] = 4;
+                            }elseif(str_contains($perm, '_delete')){
+                                $permissions[] = 5;
+                            }
+
+                        }
+                    tenancy()->end();
+                }
+              
                 $items[$module->id] = [
                     'id'          => $module->id,
                     'menu_title'  => $module->menu_title,
                     'slug'        => $module->slug,
                     'icon'        => $module->icon,
+                    'order_number' => $module->order_number,
                     'parent_menu' => $module->parent_menu,
+                    'permissions' => $permissions,
                     'children'    => [],
                 ];
             }
@@ -134,6 +182,10 @@ class ModulesController extends Controller
             return false;
         }
 
+        if($module->created_by == $user->id){
+            return true;
+        }
+
         $permissionName = $module->slug . '_access';
         $permissionCount = ModulePermission::where('module_id', $module->id)->where('permission_name', $permissionName)->count();
 
@@ -176,128 +228,321 @@ class ModulesController extends Controller
     {
         $validator = Validator::make($request->all(), [
             'module.main_model_name'        => 'required|string',
-            'module.slug'              => 'required|string|unique:modules,slug',
-            'module.menu_title'        => 'required|string',
-            'module.parent_menu'       => 'nullable|integer',
-            'module.status'            => 'boolean',
-            'module.icon'              => 'nullable|string',
-            'module.user_type'         => 'required|string',
-            'module.order_number'      => 'integer',
-            'module.tenant_id'         => 'nullable|string',
-            'module.actions'           => 'nullable|array',
-            // 'module.created_by'        => 'required|integer',
-            'module.assigned_admins'   => 'array',
-            'module.assigned_agencies' => 'array',
-            'module.permissions'       => 'array',
-            'fields'                   => 'array',
+            'module.slug'                  => 'required|string|unique:modules,slug',
+            'module.menu_title'            => 'required|string',
+            'module.parent_menu'           => 'nullable|integer',
+            'module.status'                => 'boolean',
+            'module.icon'                  => 'nullable|string',
+            'module.user_type'             => 'required_without:module.tenant_id|string',
+            'module.order_number'          => 'required|integer|unique:modules,order_number',
+            'module.tenant_id'             => 'nullable|string',
+            'module.actions'               => 'nullable|array',
+            'module.assigned_admins'       => 'nullable',
+            'module.assigned_agencies'     => 'nullable',
+            'module.permissions'           => 'array',
+            'fields'                       => 'array',
         ]);
 
         if ($validator->fails()) {
-            return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
+            return response()->json([
+                'success' => false,
+                'errors'  => $validator->errors()
+            ], 422);
         }
 
         $moduleData = $request->input('module');
-        //$user = auth()->user();
-        $user = User::find(1);
+        $user = auth()->user();
+        // $user = User::find(1);
 
+        //echo "<pre>"; print_r($user); die();
+
+        // Resolve tenant
         $resolvedTenantId = $this->resolveTenantId($request, $moduleData);
         if ($resolvedTenantId !== null) {
             $moduleData['tenant_id'] = $resolvedTenantId;
         }
 
         $moduleData['created_by'] = $user->id;
+
+        // Create module
         $module = Module::create($moduleData);
 
-        // Assigned admins
-        if (isset($moduleData['assigned_admins'])) {
-            $admins = collect($moduleData['assigned_admins'])->pluck('id')->toArray();
+        // =============================
+        // Assign Admins
+        // =============================
+        if (!empty($moduleData['assigned_admins']) && is_array($moduleData['assigned_admins'])) {
+
+            $admins = collect($moduleData['assigned_admins'])
+                ->map(fn($a) => is_array($a) ? $a['id'] : $a)
+                ->toArray();
+
             $module->assignedAdmins()->attach($admins);
         }
 
-        // Assigned agencies
-        if (isset($moduleData['assigned_agencies'])) {
-            $agencies = collect($moduleData['assigned_agencies'])->pluck('id')->toArray();
+        // =============================
+        // Assign Agencies
+        // =============================
+        if (!empty($moduleData['assigned_agencies']) && is_array($moduleData['assigned_agencies'])) {
+
+            $agencies = collect($moduleData['assigned_agencies'])
+                ->map(fn($a) => is_array($a) ? $a['id'] : $a)
+                ->toArray();
+
             $module->assignedAgencies()->attach($agencies);
         }
+        // =============================
+        // PREPARE PERMISSIONS
+        // =============================
 
-        // Permissions
-        $allPermissions = [];
-        if (isset($moduleData['permissions'])) {
-            $permissionActions = [
-                1 => 'access',
-                2 => 'create',  
-                3 => 'edit',
-                4 => 'show',
-                5 => 'delete',
-            ];
+        $allPermissionActions = [
+            'access',
+            'create',
+            'edit',
+            'show',
+            'delete'
+        ];
+
+        $permissionActions = [
+            1 => 'access',
+            2 => 'create',
+            3 => 'edit',
+            4 => 'show',
+            5 => 'delete',
+        ];
+
+        $selectedPermissions = [];
+
+        if (!empty($moduleData['permissions'])) {
 
             foreach ($moduleData['permissions'] as $permId) {
-                $action         = $permissionActions[$permId] ?? 'permission_' . $permId;
-                $permissionName = $module->slug . '_' . $action;
 
-                ModulePermission::create([
-                    'module_id'       => $module->id,
-                    'user_id'         => $user->id,
-                    'permission_name' => $permissionName,
-                ]);
+                $action = $permissionActions[$permId] ?? null;
 
-                $allPermissions[] = $permissionName;
-            }
-        }
-
-        // Assign permissions based on user_type
-        if (! empty($allPermissions) && ! empty($moduleData['user_type'])) {
-            $rolesToAssign = [];
-            if (in_array($moduleData['user_type'], ['all', 'admin'])) {
-                $rolesToAssign[] = 'admin';
-            }
-            if (in_array($moduleData['user_type'], ['all', 'customer'])) {
-                $rolesToAssign[] = 'agency';
-            }
-
-            foreach ($rolesToAssign as $roleName) {
-                $role = Role::where('name', $roleName)->first();
-                if ($role) {
-                    $finalPermissions = [];
-
-                    foreach ($allPermissions as $permissionName) {
-                        // ✅ Check or Create permission in Spatie table
-                        $permission = Permission::firstOrCreate([
-                            'name' => $permissionName,
-                            'guard_name' => 'sanctum' // default guard
-                        ]);
-
-                        $finalPermissions[] = $permission->name;
-                    }
-
-                    // ✅ Assign permissions to role (no duplicate issue)
-                    $role->givePermissionTo($finalPermissions);
+                if ($action) {
+                    $selectedPermissions[] = $module->slug . '_' . $action;
                 }
             }
         }
 
+        /*
+        |--------------------------------------------------------------------------
+        | CREATE PERMISSIONS
+        |--------------------------------------------------------------------------
+        */
+
+        $allPermissions = collect($allPermissionActions)->map(function ($action) use ($module) {
+
+            return Permission::firstOrCreate([
+                'name' => $module->slug . '_' . $action,
+                'guard_name' => 'sanctum'
+            ]);
+
+        });
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | SUPER ADMIN → ALWAYS ACCESS
+        |--------------------------------------------------------------------------
+        */
+
+        $superAdminRole = Role::where('name', 'Super Admin')->first();
+
+        if ($superAdminRole) {
+            $superAdminRole->givePermissionTo($allPermissions);
+        }
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | LOGIN USER → ALWAYS ACCESS
+        |--------------------------------------------------------------------------
+        */
+
+        // foreach ($allPermissions as $permission) {
+
+        //     ModulePermission::updateOrCreate([
+        //         'module_id' => $module->id,
+        //         'user_id' => $user->id,
+        //         'permission_name' => $permission->name
+        //     ]);
+        // }
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | TENANT PERMISSIONS ONLY
+        |--------------------------------------------------------------------------
+        */
+
+        if (!empty($module->tenant_id) && $user->user_type === 'agency') {
+            $tenant = Tenant::find($user->tenant_id);
+             tenancy()->initialize($tenant);
+                foreach ($allPermissions as $permission) {
+                    Permission::firstOrCreate([
+                        'name' => $permission->name,
+                        'guard_name' => 'sanctum'
+                    ]);
+                }
+
+                if (!empty($moduleData['tenant_user_type'])) {
+
+                    if ($moduleData['tenant_user_type'] === 'all') {
+                        $roles = Role::all();
+                    }else{
+                        $roles = Role::whereIn('id', $moduleData['tenant_user_type'])->get();
+                    }
+                    foreach ($roles as $role) {
+                        if ($role) {
+                            $role->givePermissionTo($selectedPermissions);
+                        }
+                    }
+                }
+
+             tenancy()->end();
+        }
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | USER TYPE PERMISSIONS
+        |--------------------------------------------------------------------------
+        */
+
+        if (!empty($moduleData['user_type'])) {
+
+            if ($moduleData['user_type'] === 'admin') {
+
+                if (!empty($moduleData['assigned_admins']) && is_array($moduleData['assigned_admins'])) {
+
+                    foreach ($moduleData['assigned_admins'] as $admin) {
+
+                        $adminId = is_array($admin) ? $admin['id'] : $admin;
+
+                        foreach ($selectedPermissions as $permission) {
+
+                            ModulePermission::updateOrCreate([
+                                'module_id' => $module->id,
+                                'user_id' => $adminId,
+                                'permission_name' => $permission->name
+                            ]);
+                        }
+                    }
+                }
+
+                elseif (($moduleData['assigned_admins'] ?? '') === 'all') {
+
+                    $adminTypeUser = User::where('user_type', 'admin')->pluck('id')->toArray();
+
+                    foreach ($adminTypeUser as $adminId) {
+                        $user = User::find($adminId);
+                        $roles = $user->roles;
+
+                        foreach ($roles as $role) {
+                            if ($role) {
+                                $role->givePermissionTo($selectedPermissions);
+                            }
+                        }
+                    }
+                }
+            }
+
+
+            elseif ($moduleData['user_type'] === 'agency') {
+
+                if (!empty($moduleData['assigned_agencies']) && is_array($moduleData['assigned_agencies'])) {
+
+                    foreach ($moduleData['assigned_agencies'] as $agency) {
+
+                        $agencyId = is_array($agency) ? $agency['id'] : $agency;
+
+                        foreach ($selectedPermissions as $permission) {
+
+                            ModulePermission::updateOrCreate([
+                                'module_id' => $module->id,
+                                'user_id' => $agencyId,
+                                'permission_name' => $permission->name
+                            ]);
+                        }
+                    }
+                }
+
+                elseif (($moduleData['assigned_agencies'] ?? '') === 'all') {
+
+                    $agencyTypeUser = User::where('user_type', 'agency')->pluck('id')->toArray();
+
+                    foreach ($agencyTypeUser as $agencyId) {
+                        $user = User::find($agencyId);
+                        $roles = $user->roles;
+
+                        foreach ($roles as $role) {
+                            if ($role) {
+                                $role->givePermissionTo($selectedPermissions);
+                            }
+                        }
+                    }
+                    
+                }
+            }
+
+
+            elseif ($moduleData['user_type'] === 'all') {
+
+                // ✅ Get users with roles in one query
+                $users = User::whereIn('user_type', ['agency', 'admin'])
+                    ->with('roles')
+                    ->get();
+
+                foreach ($users as $user) {
+                    foreach ($user->roles as $role) {
+
+                        if ($role) {
+                            $role->givePermissionTo($selectedPermissions);
+                        }
+                    }
+                }
+            }
+        }
+
+        // =============================
         // Fields
+        // =============================
         if ($request->has('fields')) {
+
             foreach ($request->input('fields') as $fieldData) {
-                $field = ModuleField::create(array_merge($fieldData, ['module_id' => $module->id]));
-                if (isset($fieldData['options'])) {
+
+                $field = ModuleField::create(array_merge(
+                    $fieldData,
+                    ['module_id' => $module->id]
+                ));
+
+                if (!empty($fieldData['options'])) {
+
                     foreach ($fieldData['options'] as $option) {
-                        ModuleFieldOption::create(array_merge($option, ['module_field_id' => $field->id]));
+
+                        ModuleFieldOption::create(array_merge(
+                            $option,
+                            ['module_field_id' => $field->id]
+                        ));
                     }
                 }
             }
         }
 
-        // Load fields with column type
+        // Load relations
         $module->load('fields.columnType');
 
-        // Generate files and create directory structure
+        // Generate files
         $this->generateModuleFiles($module);
+
         $fileService = new ModuleFileStructureService();
         $fileService->createModuleDirectories($module->slug);
         $fileService->createGitkeepFiles($module->slug);
 
-        return response()->json(['success' => true, 'message' => 'Module created successfully']);
+        return response()->json([
+            'success' => true,
+            'message' => 'Module created successfully'
+        ]);
     }
 
     public function show($id)
@@ -322,7 +567,7 @@ class ModulesController extends Controller
         return response()->json(['success' => true, 'data' => $module]);
     }
 
-    public function updateWithFields(Request $request, $id)
+    public function old_updateWithFields(Request $request, $id)
     {
         $module = Module::findOrFail($id);
 
@@ -431,6 +676,577 @@ class ModulesController extends Controller
             DB::rollback();
             return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
         }
+    }
+
+    public function updateWithFields(Request $request, $id)
+    {
+        $module = Module::findOrFail($id);
+
+        $validator = Validator::make($request->all(), [
+            'module.id'                => 'required|integer',
+            'module.main_model_name'   => 'required|string',
+            'module.slug'              => 'required|string|unique:modules,slug,' . $id,
+            'module.menu_title'        => 'required|string',
+            'module.parent_menu'       => 'nullable|integer',
+            'module.status'            => 'boolean',
+            'module.icon'              => 'nullable|string',
+            'module.user_type'         => 'nullable|string',
+            'module.order_number'      => 'nullable|integer',
+            'module.tenant_id'         => 'nullable|string',
+            'module.actions'           => 'nullable|array',
+            'module.assigned_admins'   => 'nullable',
+            'module.assigned_agencies' => 'nullable',
+            'module.permissions'       => 'nullable|array',
+            'fields'                   => 'array',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
+        }
+
+        DB::beginTransaction();
+        try {
+            $moduleData = $request->input('module');
+            $user       = auth()->user();
+
+            // ── Resolve Tenant ──────────────────────────────────────────────────
+            $resolvedTenantId = $this->resolveTenantId($request, $moduleData);
+            if ($resolvedTenantId !== null) {
+                $moduleData['tenant_id'] = $resolvedTenantId;
+            }
+
+            // Preserve original creator
+            if (empty($module->created_by)) {
+                $moduleData['created_by'] = $user->id;
+            }
+
+            // ── 1. OLD Fields capture (before update) ───────────────────────────
+            $oldFields = $module->fields()->with('columnType')->get()->keyBy('db_column');
+
+            // ── 2. Update Module Record ─────────────────────────────────────────
+            $module->update($moduleData);
+
+            // ── 3. Sync Assignments ─────────────────────────────────────────────
+            $module->assignedAdmins()->sync(
+                collect($moduleData['assigned_admins'] ?? [])
+                    ->map(fn($a) => is_array($a) ? $a['id'] : $a)
+                    ->toArray()
+            );
+            $module->assignedAgencies()->sync(
+                collect($moduleData['assigned_agencies'] ?? [])
+                    ->map(fn($a) => is_array($a) ? $a['id'] : $a)
+                    ->toArray()
+            );
+
+            // ── 4. Permissions ──────────────────────────────────────────────────
+            $permissionActions = [
+                1 => 'access',
+                2 => 'create',
+                3 => 'edit',
+                4 => 'show',
+                5 => 'delete',
+            ];
+            $allPermissionActions = ['access', 'create', 'edit', 'show', 'delete'];
+            $selectedPermissions  = [];
+
+            // Ensure all base permissions exist
+            $allPermissions = collect($allPermissionActions)->map(function ($action) use ($module) {
+                return Permission::firstOrCreate([
+                    'name'       => $module->slug . '_' . $action,
+                    'guard_name' => 'sanctum',
+                ]);
+            });
+
+            // Super Admin always gets all
+            $superAdminRole = Role::where('name', 'Super Admin')->first();
+            if ($superAdminRole) {
+                $superAdminRole->givePermissionTo($allPermissions);
+            }
+
+            // Build selected permissions from request
+            if (!empty($moduleData['permissions'])) {
+                foreach ($moduleData['permissions'] as $permId) {
+                    $action = $permissionActions[$permId] ?? null;
+                    if ($action) {
+                        $selectedPermissions[] = $module->slug . '_' . $action;
+                    }
+                }
+            }
+
+            // Delete old module permissions and recreate for current user
+            $module->permissions()->delete();
+            foreach ($allPermissions as $permission) {
+                ModulePermission::updateOrCreate([
+                    'module_id'       => $module->id,
+                    'user_id'         => $user->id,
+                    'permission_name' => $permission->name,
+                ]);
+            }
+
+            // Assign permissions by user_type
+            if (!empty($moduleData['user_type']) && !empty($selectedPermissions)) {
+                $userType = $moduleData['user_type'];
+
+                if (in_array($userType, ['admin', 'all'])) {
+                    if (!empty($moduleData['assigned_admins']) && is_array($moduleData['assigned_admins'])) {
+                        foreach ($moduleData['assigned_admins'] as $admin) {
+                            $adminId = is_array($admin) ? $admin['id'] : $admin;
+                            foreach ($selectedPermissions as $permName) {
+                                $perm = Permission::firstOrCreate(['name' => $permName, 'guard_name' => 'sanctum']);
+                                ModulePermission::updateOrCreate([
+                                    'module_id'       => $module->id,
+                                    'user_id'         => $adminId,
+                                    'permission_name' => $perm->name,
+                                ]);
+                            }
+                        }
+                    } elseif (($moduleData['assigned_admins'] ?? '') === 'all') {
+                        $role = Role::where('name', 'admin')->first();
+                        if ($role) $role->givePermissionTo($selectedPermissions);
+                    }
+                }
+
+                if (in_array($userType, ['agency', 'all'])) {
+                    if (!empty($moduleData['assigned_agencies']) && is_array($moduleData['assigned_agencies'])) {
+                        foreach ($moduleData['assigned_agencies'] as $agency) {
+                            $agencyId = is_array($agency) ? $agency['id'] : $agency;
+                            foreach ($selectedPermissions as $permName) {
+                                $perm = Permission::firstOrCreate(['name' => $permName, 'guard_name' => 'sanctum']);
+                                ModulePermission::updateOrCreate([
+                                    'module_id'       => $module->id,
+                                    'user_id'         => $agencyId,
+                                    'permission_name' => $perm->name,
+                                ]);
+                            }
+                        }
+                    } elseif (($moduleData['assigned_agencies'] ?? '') === 'all') {
+                        $role = Role::where('name', 'agency')->first();
+                        if ($role) $role->givePermissionTo($selectedPermissions);
+                    }
+                }
+            }
+
+            // Tenant-level permissions
+            if (!empty($module->tenant_id) && $user->user_type === 'agency') {
+                $tenant = Tenant::find($user->tenant_id);
+                tenancy()->initialize($tenant);
+                foreach ($allPermissions as $permission) {
+                    Permission::firstOrCreate([
+                        'name'       => $permission->name,
+                        'guard_name' => 'sanctum',
+                    ]);
+                }
+                tenancy()->end();
+            }
+
+            // ── 5. Sync Fields ──────────────────────────────────────────────────
+            $module->fields()->delete(); // cascades to options
+
+            if ($request->has('fields')) {
+                foreach ($request->input('fields') as $fieldData) {
+                    $field = ModuleField::create(array_merge($fieldData, ['module_id' => $module->id]));
+                    if (!empty($fieldData['options'])) {
+                        foreach ($fieldData['options'] as $option) {
+                            ModuleFieldOption::create(array_merge($option, ['module_field_id' => $field->id]));
+                        }
+                    }
+                }
+            }
+
+            // Reload fresh fields with relations
+            $module->load('fields.columnType');
+
+            // ── 6. Regenerate All Files ─────────────────────────────────────────
+            $this->updateModuleFiles($module, $oldFields);
+
+            DB::commit();
+            return response()->json(['success' => true, 'message' => 'Module updated successfully']);
+
+        } catch (\Exception $e) {
+            DB::rollback();
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
+        }
+    }
+
+    private function updateModuleFiles($module, $oldFields = null)
+    {
+        $modelName = $module->main_model_name;
+        $table     = strtolower(Str::plural($module->slug));
+        $fk        = strtolower(Str::singular($module->slug));
+        $baseTime  = now();
+        $i         = 1;
+
+        $newFields     = $module->fields->keyBy('db_column');
+        $oldColumnKeys = $oldFields ? $oldFields->keys()->toArray() : [];
+        $newColumnKeys = $newFields->keys()->toArray();
+
+        $addedColumns   = array_diff($newColumnKeys, $oldColumnKeys); // nava fields
+        $removedColumns = array_diff($oldColumnKeys, $newColumnKeys); // delete thayela fields
+
+        // ── A. ALTER Migration (ADD new + DROP removed columns) ─────────────────
+        $upStatements   = '';
+        $downStatements = '';
+
+        // ADD new columns
+        foreach ($addedColumns as $col) {
+            $field     = $newFields[$col];
+            $inputType = $field->column_type_id ?? ($field->columnType->column_type_id ?? null);
+            $type      = $field->columnType->db_type ?? 'string';
+
+            if ($field->model_name && !$field->is_multiple) {
+                // BelongsTo FK
+                $upStatements   .= "\n            \$table->unsignedBigInteger('{$col}')->nullable();";
+                $downStatements .= "\n            \$table->dropColumn('{$col}');";
+            } elseif (!in_array($inputType, [14, 15])) {
+                // Normal field
+                $upStatements   .= "\n            \$table->{$type}('{$col}')->nullable();";
+                $downStatements .= "\n            \$table->dropColumn('{$col}');";
+            } elseif (in_array($inputType, [14, 15]) && !$field->is_multiple) {
+                // Single file column
+                $upStatements   .= "\n            \$table->string('{$col}')->nullable();";
+                $downStatements .= "\n            \$table->dropColumn('{$col}');";
+            }
+            // Multiple file → separate table (handle below)
+        }
+
+        // DROP removed columns
+        foreach ($removedColumns as $col) {
+            $oldField  = $oldFields[$col];
+            $inputType = $oldField->column_type_id ?? ($oldField->columnType->column_type_id ?? null);
+            $type      = $oldField->columnType->db_type ?? 'string';
+
+            // Multiple file fields → alag table drop kariye (niche handle)
+            // Single file / normal field → column drop
+            if (in_array($inputType, [14, 15]) && $oldField->is_multiple) {
+                // Alag table che, column nathi — skip here, handle below
+                continue;
+            }
+
+            // Safety check — column exist kare to j drop karo
+            $upStatements   .= "\n            if (Schema::hasColumn('{$table}', '{$col}')) {";
+            $upStatements   .= "\n                \$table->dropColumn('{$col}');";
+            $upStatements   .= "\n            }";
+
+            // Rollback ma best-effort re-add
+            if ($oldField->model_name && !$oldField->is_multiple) {
+                $downStatements .= "\n            \$table->unsignedBigInteger('{$col}')->nullable();";
+            } elseif (!in_array($inputType, [14, 15])) {
+                $downStatements .= "\n            \$table->{$type}('{$col}')->nullable();";
+            } else {
+                $downStatements .= "\n            \$table->string('{$col}')->nullable();";
+            }
+        }
+
+        // Migration file generate karo (jyare koi change hoy)
+        if (!empty(trim($upStatements))) {
+            $alterDate     = $baseTime->format('Y_m_d_His');
+            $migrationName = "alter_{$table}_sync_columns";
+
+            $alterMigration = <<<PHP
+            <?php
+
+            use Illuminate\Database\Migrations\Migration;
+            use Illuminate\Database\Schema\Blueprint;
+            use Illuminate\Support\Facades\Schema;
+
+            return new class extends Migration
+            {
+                public function up(): void
+                {
+                    Schema::table('{$table}', function (Blueprint \$table) {{$upStatements}
+                    });
+                }
+
+                public function down(): void
+                {
+                    Schema::table('{$table}', function (Blueprint \$table) {{$downStatements}
+                    });
+                }
+            };
+            PHP;
+
+            $alterPath = database_path("migrations/{$alterDate}_{$migrationName}.php");
+            File::put($alterPath, $alterMigration);
+            Artisan::call('migrate', [
+                '--path'  => "database/migrations/{$alterDate}_{$migrationName}.php",
+                '--force' => true,
+            ]);
+        }
+
+        // ── B. Removed Multiple-File Attachment Tables → DROP ───────────────────
+        foreach ($removedColumns as $col) {
+            $oldField  = $oldFields[$col];
+            $inputType = $oldField->column_type_id ?? ($oldField->columnType->column_type_id ?? null);
+
+            if (in_array($inputType, [14, 15]) && $oldField->is_multiple) {
+                $attachTable = "{$table}_" . Str::plural($col);
+
+                if (\Schema::hasTable($attachTable)) {
+                    \Schema::dropIfExists($attachTable);
+                }
+            }
+        }
+
+        // ── C. New Multiple-File Attachment Tables → CREATE ─────────────────────
+        foreach ($module->fields as $field) {
+            $inputType = $field->column_type_id ?? ($field->columnType->column_type_id ?? null);
+
+            if (in_array($inputType, [14, 15]) && $field->is_multiple) {
+                $attachTable = "{$table}_" . Str::plural($field->db_column);
+
+                if (!\Schema::hasTable($attachTable)) {
+                    $date = $baseTime->copy()->addSeconds($i)->format('Y_m_d_His');
+                    $i++;
+
+                    $migration = <<<PHP
+                    <?php
+
+                    use Illuminate\Database\Migrations\Migration;
+                    use Illuminate\Database\Schema\Blueprint;
+                    use Illuminate\Support\Facades\Schema;
+
+                    return new class extends Migration
+                    {
+                        public function up(): void
+                        {
+                            Schema::create('{$attachTable}', function (Blueprint \$table) {
+                                \$table->id();
+                                \$table->unsignedBigInteger('{$fk}_id');
+                                \$table->string('file_name');
+                                \$table->string('file_path');
+                                \$table->string('mime_type')->nullable();
+                                \$table->integer('file_size')->nullable();
+                                \$table->timestamps();
+
+                                \$table->foreign('{$fk}_id')
+                                    ->references('id')
+                                    ->on('{$table}')
+                                    ->cascadeOnDelete();
+                            });
+                        }
+
+                        public function down(): void
+                        {
+                            Schema::dropIfExists('{$attachTable}');
+                        }
+                    };
+                    PHP;
+
+                    $path = database_path("migrations/{$date}_create_{$attachTable}.php");
+                    File::put($path, $migration);
+                    Artisan::call('migrate', [
+                        '--path'  => "database/migrations/{$date}_create_{$attachTable}.php",
+                        '--force' => true,
+                    ]);
+                }
+            }
+        }
+
+        // ── D. Removed Pivot Tables → DROP (jyare belongsToMany field remove thay) ──
+        $oldPivots = [];
+        if ($oldFields) {
+            foreach ($oldFields as $col => $oldField) {
+                if ($oldField->model_name && $oldField->is_multiple) {
+                    $relatedModel = Str::singular($oldField->model_name);
+                    $relatedTable = strtolower(Str::plural($relatedModel));
+
+                    $tables = [$table, $relatedTable];
+                    sort($tables);
+                    $pivot = implode('_', $tables);
+
+                    $oldPivots[$pivot] = true;
+                }
+            }
+        }
+
+        $newPivots = [];
+        foreach ($module->fields as $field) {
+            if ($field->model_name && $field->is_multiple) {
+                $relatedModel = Str::singular($field->model_name);
+                $relatedTable = strtolower(Str::plural($relatedModel));
+
+                $tables = [$table, $relatedTable];
+                sort($tables);
+                $pivot = implode('_', $tables);
+
+                $newPivots[$pivot] = true;
+            }
+        }
+
+        // Old pivot che pan new ma nathi → DROP
+        foreach (array_diff_key($oldPivots, $newPivots) as $pivot => $_) {
+            if (\Schema::hasTable($pivot)) {
+                \Schema::dropIfExists($pivot);
+            }
+        }
+
+        // ── E. New Pivot Tables → CREATE ────────────────────────────────────────
+        $createdPivots = [];
+        foreach ($module->fields as $field) {
+            if ($field->model_name && $field->is_multiple) {
+                $relatedModel = Str::singular($field->model_name);
+                $relatedTable = strtolower(Str::plural($relatedModel));
+                $relatedFk    = strtolower(Str::singular($relatedModel));
+
+                $tables = [$table, $relatedTable];
+                sort($tables);
+                $pivot = implode('_', $tables);
+
+                if (in_array($pivot, $createdPivots)) continue;
+                $createdPivots[] = $pivot;
+
+                if (!\Schema::hasTable($pivot)) {
+                    $date = $baseTime->copy()->addSeconds($i)->format('Y_m_d_His');
+                    $i++;
+
+                    $migration = <<<PHP
+                    <?php
+
+                    use Illuminate\Database\Migrations\Migration;
+                    use Illuminate\Database\Schema\Blueprint;
+                    use Illuminate\Support\Facades\Schema;
+
+                    return new class extends Migration
+                    {
+                        public function up(): void
+                        {
+                            Schema::create('{$pivot}', function (Blueprint \$table) {
+                                \$table->id();
+                                \$table->unsignedBigInteger('{$fk}_id');
+                                \$table->unsignedBigInteger('{$relatedFk}_id');
+                                \$table->timestamps();
+
+                                \$table->foreign('{$fk}_id')
+                                    ->references('id')
+                                    ->on('{$table}')
+                                    ->cascadeOnDelete();
+
+                                \$table->foreign('{$relatedFk}_id')
+                                    ->references('id')
+                                    ->on('{$relatedTable}')
+                                    ->cascadeOnDelete();
+                            });
+                        }
+
+                        public function down(): void
+                        {
+                            Schema::dropIfExists('{$pivot}');
+                        }
+                    };
+                    PHP;
+
+                    $path = database_path("migrations/{$date}_create_{$pivot}.php");
+                    File::put($path, $migration);
+                    Artisan::call('migrate', [
+                        '--path'  => "database/migrations/{$date}_create_{$pivot}.php",
+                        '--force' => true,
+                    ]);
+                }
+            }
+        }
+
+        // ── F. Regenerate Model File ────────────────────────────────────────────
+        $modelContent = "<?php\n\nnamespace App\\Models;\n\nuse Illuminate\\Database\\Eloquent\\Model;\n\nclass {$modelName} extends Model\n{\n    protected \$table = '{$table}';\n\n    protected \$fillable = [";
+
+        foreach ($module->fields as $field) {
+            $inputType = $field->column_type_id ?? ($field->columnType->column_type_id ?? null);
+            if (!in_array($inputType, [14, 15]) || !$field->is_multiple) {
+                $modelContent .= "\n        '{$field->db_column}',";
+            }
+        }
+        $modelContent .= "\n    ];\n";
+
+        // hasMany file relations
+        foreach ($module->fields as $field) {
+            $inputType = $field->column_type_id ?? ($field->columnType->column_type_id ?? null);
+            if (in_array($inputType, [14, 15]) && $field->is_multiple) {
+                $relation    = Str::camel(Str::plural($field->db_column));
+                $attachModel = $modelName . ucfirst($relation);
+                $modelContent .= "\n\n    public function {$relation}()\n    {\n        return \$this->hasMany(\\App\\Models\\{$attachModel}::class, '{$fk}_id');\n    }";
+            }
+        }
+
+        // belongsToMany pivot relations
+        $addedRelations = [];
+        foreach ($module->fields as $field) {
+            if ($field->model_name && $field->is_multiple) {
+                $relatedModel = Str::singular($field->model_name);
+                $relatedTable = strtolower(Str::plural($relatedModel));
+                $relatedFk    = strtolower(Str::singular($relatedModel));
+
+                $tables = [$table, $relatedTable];
+                sort($tables);
+                $pivot  = implode('_', $tables);
+                $method = Str::plural(Str::camel($relatedFk));
+
+                if (in_array($method, $addedRelations)) continue;
+                $addedRelations[] = $method;
+
+                $modelContent .= "\n\n    public function {$method}()\n    {\n        return \$this->belongsToMany(\n            \\App\\Models\\{$relatedModel}::class,\n            '{$pivot}',\n            '{$fk}_id',\n            '{$relatedFk}_id'\n        )->withTimestamps();\n    }";
+            }
+        }
+
+        $modelContent .= "\n}\n";
+        File::put(app_path("Models/{$modelName}.php"), $modelContent);
+
+        // ── G. Regenerate Controller File ───────────────────────────────────────
+        $controllerName = $modelName . 'Controller';
+        $controllerDir  = app_path("Http/Controllers/Modules");
+
+        if (!File::exists($controllerDir)) {
+            File::makeDirectory($controllerDir, 0755, true);
+        }
+
+        $controllerContent = <<<PHP
+        <?php
+
+        namespace App\Http\Controllers\Modules;
+
+        use App\Http\Controllers\Controller;
+        use App\Models\\{$modelName};
+        use Illuminate\Http\Request;
+
+        class {$controllerName} extends Controller
+        {
+            public function index(Request \$request)
+            {
+                \$data = {$modelName}::latest()->paginate(15);
+                return response()->json(['success' => true, 'data' => \$data]);
+            }
+
+            public function store(Request \$request)
+            {
+                \$record = {$modelName}::create(\$request->all());
+                return response()->json(['success' => true, 'data' => \$record], 201);
+            }
+
+            public function show(\$id)
+            {
+                \$record = {$modelName}::findOrFail(\$id);
+                return response()->json(['success' => true, 'data' => \$record]);
+            }
+
+            public function update(Request \$request, \$id)
+            {
+                \$record = {$modelName}::findOrFail(\$id);
+                \$record->update(\$request->all());
+                return response()->json(['success' => true, 'data' => \$record]);
+            }
+
+            public function destroy(\$id)
+            {
+                {$modelName}::findOrFail(\$id)->delete();
+                return response()->json(['success' => true, 'message' => 'Deleted successfully']);
+            }
+        }
+        PHP;
+
+        File::put("{$controllerDir}/{$controllerName}.php", $controllerContent);
+
+        // ── H. Module Directories ───────────────────────────────────────────────
+        $fileService = new ModuleFileStructureService();
+        $fileService->createModuleDirectories($module->slug);
+        $fileService->createGitkeepFiles($module->slug);
     }
 
     public function destroyWithFields($id)
