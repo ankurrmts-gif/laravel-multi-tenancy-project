@@ -64,12 +64,8 @@ class ModulesController extends Controller
 
             $allowed = $modules;
 
-            if($user->user_type == 'tenant'){
-                $allowed = $modules;
-            }else{
-                $allowed = $modules->filter(fn($module) => $this->userCanAccessModule($module, $user));
-            }
-
+          
+            $allowed = $modules->filter(fn($module) => $this->userCanAccessModule($module, $user));
             $tree  = [];
             $items = [];
 
@@ -177,6 +173,16 @@ class ModulesController extends Controller
             return false;
         }
 
+        $permissionName = $module->slug . '_access';
+
+        if($user->user_type === 'tenant'){
+            tenancy()->initialize($user->tenant_id);
+            if (! $user->hasPermissionTo($permissionName, 'sanctum')) {
+                return false;
+            }
+            tenancy()->end();
+        }
+
         // user_type restrictions
         if (! empty($module->user_type) && $module->user_type !== 'all' && $module->user_type !== $user->user_type) {
             return false;
@@ -186,7 +192,6 @@ class ModulesController extends Controller
             return true;
         }
 
-        $permissionName = $module->slug . '_access';
         $permissionCount = ModulePermission::where('module_id', $module->id)->where('permission_name', $permissionName)->count();
 
         // fallback: if no permission is defined for this module, allow it
@@ -390,7 +395,7 @@ class ModulesController extends Controller
                     if ($moduleData['tenant_user_type'] === 'all') {
                         $roles = Role::all();
                     }else{
-                        $roles = Role::whereIn('id', $moduleData['tenant_user_type'])->get();
+                        $roles = Role::where('id', $moduleData['tenant_user_type'])->get();
                     }
                     foreach ($roles as $role) {
                         if ($role) {
@@ -773,6 +778,53 @@ class ModulesController extends Controller
                     'user_id'         => $user->id,
                     'permission_name' => $permission->name,
                 ]);
+            }
+
+            if (!empty($module->tenant_id) && $user->user_type === 'agency') {
+
+                $tenant = Tenant::find($user->tenant_id);
+
+                if ($tenant) {
+
+                    tenancy()->initialize($tenant);
+
+                    // ✅ Ensure permissions exist
+                    foreach ($allPermissions as $permission) {
+                        Permission::firstOrCreate([
+                            'name' => $permission->name,
+                            'guard_name' => 'sanctum'
+                        ]);
+                    }
+
+                    // ✅ Assign to roles
+                    if (!empty($moduleData['tenant_user_type'])) {
+
+                        if ($moduleData['tenant_user_type'] === 'all') {
+                            $roles = Role::all();
+                        } else {
+                            $roles = Role::where('id', $moduleData['tenant_user_type'])->get();
+                        }
+
+                        foreach ($roles as $role) {
+                            if ($role) {
+                                // 🔥 KEY CHANGE HERE
+                                $existing = $role->permissions->pluck('name');
+
+                                $finalPermissions = $existing
+                                    ->reject(fn($perm) => str_starts_with($perm, $module->slug . '_'))
+                                    ->merge($selectedPermissions)
+                                    ->unique()
+                                    ->values()
+                                    ->toArray();
+
+                                $role->syncPermissions($finalPermissions);
+
+                            }
+                        }
+                    }
+
+                    tenancy()->end();
+                }
             }
 
             if (!empty($moduleData['user_type']) && !empty($selectedPermissions)) {

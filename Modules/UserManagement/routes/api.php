@@ -12,6 +12,7 @@ use Modules\UserManagement\Http\Controllers\Api\UserController;
 use Modules\UserManagement\Http\Controllers\Api\APUserManagementController;
 use Modules\UserManagement\Http\Controllers\Api\ModuleController;
 use Modules\UserManagement\Http\Controllers\Api\DynamicCrudController;
+use Modules\UserManagement\Http\Controllers\Api\EmailTemplateController;
 
 // Use AuthenticateSanctumMultiTenant so tokens are resolved from central or tenant DBs.
 Route::middleware([\App\Http\Middleware\AuthenticateSanctumMultiTenant::class])->group(function () {
@@ -92,6 +93,12 @@ Route::middleware(\App\Http\Middleware\AuthenticateSanctumMultiTenant::class)->g
     Route::get('get-setting-details', [CommonController::class, 'getSettingDetails']);
     Route::post('add-settings', [CommonController::class, 'addSettings']);
     Route::post('update-settings', [CommonController::class, 'updateSettings']);
+
+    
+    Route::get('get-email-templates', [EmailTemplateController::class, 'index']);
+    Route::get('get-email-template/{id}', [EmailTemplateController::class, 'show']);
+    Route::post('create-email-template', [EmailTemplateController::class, 'store']);
+    Route::post('update-email-template', [EmailTemplateController::class, 'update']);
 
     Route::get('/get-column-types', [CommonController::class, 'getColumnTypes']);
     Route::get('/get-all-models', [CommonController::class, 'getAllModels']);

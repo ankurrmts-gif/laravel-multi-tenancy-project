@@ -124,7 +124,7 @@ class AuthController extends Controller
         // $refreshToken->accessToken->expires_at = now()->addMinutes(30);
         // $refreshToken->accessToken->save();
 
-        $tenantUser->sendEmailVerificationNotification();
+        Mail::to($tenantUser->email)->send(new \App\Mail\VerifyEmailMail($tenantUser));
 
         tenancy()->initialize($tenant);
         $allPermissions = collect([
@@ -173,7 +173,8 @@ class AuthController extends Controller
             ], 400);
         }
 
-        $user->sendEmailVerificationNotification();
+       
+        Mail::to($user->email)->send(new \App\Mail\VerifyEmailMail($user));
 
         return response()->json([
             'message' => 'Verification link sent successfully.'
@@ -1130,6 +1131,22 @@ class AuthController extends Controller
         if (!$user) {
             $relation = CentralTenantTelations::where('email', $request->email)->first();
 
+            if ($relation) {
+                $tenant = Tenant::find($relation->tenant_id);
+
+                if (!$tenant) {
+                    return response()->json([
+                        'message' => 'Tenant not found'
+                    ], 404);
+                }
+
+                tenancy()->initialize($tenant);
+
+                 $user = User::where('email', $request->email)->first();
+
+                tenancy()->end();
+            }
+
             if (!$relation) {
                 return response()->json([
                     'status' => false,
@@ -1153,11 +1170,7 @@ class AuthController extends Controller
         $resetUrl = config('app.frontend_url') .
             "reset-password?token={$plainToken}&email=" . urlencode($request->email);
 
-        // Send mail
-        Mail::raw("Click the link to reset your password: $resetUrl", function ($message) use ($request) {
-            $message->to($request->email)
-                    ->subject('Reset Password Request');
-        });
+        Mail::to($request->email)->send(new \App\Mail\ResetPasswordMail($user, $resetUrl));
 
         return response()->json([
             'status' => true,

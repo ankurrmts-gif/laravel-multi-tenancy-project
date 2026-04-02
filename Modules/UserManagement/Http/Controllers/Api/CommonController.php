@@ -16,7 +16,7 @@ use App\Models\Tenant;
 use App\Models\CentralTenantTelations;
 use App\Models\UserInvitations;
 use App\Models\User;
-use App\Models\Settings;
+use App\Models\Settings,App\Models\ContactUs;
 use App\Models\ColumnTypes;
 use Spatie\Permission\Models\Role;
 use Spatie\Permission\Models\Permission;
@@ -338,12 +338,20 @@ class CommonController extends Controller
             return response()->json(['errors' => $validator->errors()], 422);
         }
 
+        $contact = new ContactUs();
+        $contact->name = $request->name;
+        $contact->email = $request->email;
+        $contact->message = $request->message;
+        $contact->save();
+
         $EmailId = Settings::where('key', 'support_email')->first();
 
-        Mail::raw("Name: {$request->name}\nEmail: {$request->email}\nMessage: {$request->message}", function ($message) use ($request, $EmailId) {
-            $message->to($EmailId->value)
-                    ->subject('Contact Us Message');
-        });
+        Mail::to($EmailId->value)
+            ->send(new \App\Mail\ContactUsMail([
+                'name' => $request->name,
+                'email' => $request->email,
+                'message' => $request->message,
+            ]));
 
         return response()->json([
             'status' => true,

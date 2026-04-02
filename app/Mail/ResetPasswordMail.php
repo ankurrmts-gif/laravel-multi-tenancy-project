@@ -7,44 +7,40 @@ use Illuminate\Queue\SerializesModels;
 use Illuminate\Bus\Queueable;
 use App\Models\EmailTemplate;
 
-class UserOtpVerifyMail extends Mailable
+class ResetPasswordMail extends Mailable
 {
     use Queueable, SerializesModels;
 
-    public $otp;
-    public $expired;
     public $user;
+    public $resetUrl;
 
-    public function __construct($user, $otp, $expired)
+    public function __construct($user, $resetUrl)
     {
         $this->user = $user;
-        $this->otp = $otp;
-        $this->expired = $expired;
+        $this->resetUrl = $resetUrl;
     }
 
     public function build()
     {
-        // ✅ Get template from DB
-        $template = EmailTemplate::where('slug', 'otp-verify')->first();
+        // ✅ Get template
+        $template = EmailTemplate::where('slug', 'reset-pass')->first();
 
         if (!$template) {
-            throw new \Exception('OTP email template not found');
+            throw new \Exception('Reset password template not found');
         }
 
         // ✅ Replace variables
         $content = $this->parseTemplate($template->content, [
-            'username' => $this->user->first_name.' '.$this->user->last_name ?? 'User',
-            'otp' => $this->otp,
-            'expiry' => $this->expired,
-            'app_name' => config('app.name'),
-            'year' => date('Y'),
+            'username'   => $this->user->first_name . ' ' . $this->user->last_name ?? 'User',
+            'reset_link' => $this->resetUrl,
+            'app_name'   => config('app.name'),
+            'year'       => date('Y'),
         ]);
 
         return $this->subject($template->subject)
-                    ->html($content); // ✅ IMPORTANT
+                    ->html($content);
     }
 
-    // ✅ Helper function
     private function parseTemplate($content, $data)
     {
         foreach ($data as $key => $value) {

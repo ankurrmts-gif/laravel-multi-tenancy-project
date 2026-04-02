@@ -22,6 +22,10 @@ class DatabaseSeeder extends Seeder
          * ALWAYS USE CENTRAL DB
          * -------------------------------------------------*/
         config(['database.default' => 'mysql']);
+
+        $this->call([
+            EmailTemplateSeeder::class,
+        ]);
  
         /** -------------------------------------------------
          * GET ALL PERMISSIONS FROM DB
