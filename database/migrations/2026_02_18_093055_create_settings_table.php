@@ -15,6 +15,8 @@ return new class extends Migration
             $table->bigIncrements('id');
             $table->string('key')->nullable();
             $table->text('value')->nullable();
+            $table->string('type')->default('text'); // text, file, json, boolean
+            $table->string('group')>nullable();
             $table->timestamps();
         });
     }

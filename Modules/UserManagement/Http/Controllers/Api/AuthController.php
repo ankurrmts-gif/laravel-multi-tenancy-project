@@ -1308,10 +1308,48 @@ class AuthController extends Controller
             $user->load('roles.permissions');
         }
 
+        // 👉 BEFORE SIZE
+        $beforeCache = $this->getFolderSize(storage_path('framework/cache'));
+        $beforeView  = $this->getFolderSize(storage_path('framework/views'));
+        $beforeLog   = $this->getFolderSize(storage_path('logs'));
+
+        $user->cache_size = [
+            'total' => $this->formatSize($beforeCache + $beforeView + $beforeLog),
+        ];
+
         return response()->json([
             'type' => 'central',
             'user' => $user
         ]);
+    }
+
+    private function getFolderSize($path){
+        $size = 0;
+
+        if (!file_exists($path)) {
+            return 0;
+        }
+
+        foreach (new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($path)) as $file) {
+            if ($file->isFile()) {
+                $size += $file->getSize();
+            }
+        }
+
+        return $size;
+    }
+
+    private function formatSize($bytes)
+    {
+        if ($bytes >= 1073741824) {
+            return number_format($bytes / 1073741824, 2) . ' GB';
+        } elseif ($bytes >= 1048576) {
+            return number_format($bytes / 1048576, 2) . ' MB';
+        } elseif ($bytes >= 1024) {
+            return number_format($bytes / 1024, 2) . ' KB';
+        }
+
+        return $bytes . ' B';
     }
 
     public function updateProfile(Request $request)

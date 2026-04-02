@@ -33,26 +33,31 @@ class CommonController extends Controller
 {  
     public function getAllSettings(Request $request): JsonResponse
     {
-        if (!$request->user()->can('settings-access')) {
-            return response()->json(['message' => 'Access Denied.'], 403);
-        }
- 
-        $settings = Settings::select('id', 'key', 'value')->get();
- 
-        // if ($request->filled('search')) {
-        //     $search = $request->search;
- 
-        //     $settings = $settings->where(function ($q) use ($search) {
-        //         $q->where('key', 'like', "%{$search}%")
-        //         ->orWhere('value', 'like', "%{$search}%");
-        //     });
+       // if (!$request->user()->can('settings-access')) {
+        //     return response()->json(['message' => 'Access Denied.'], 403);
         // }
+ 
+        $settings = Settings::all()->groupBy('group');
 
-        // $settings = $settings->paginate(10);
-        
+        $response = [];
+        foreach ($settings as $group => $items) {
+            foreach ($items as $item) {
+
+                // JSON decode
+                $value = json_decode($item->value, true);
+                $value = $value ?? $item->value;
+
+                $response[$group][$item->key] = [
+                    'value' => $value,
+                    'type'  => $item->type ?? 'text' // default text
+                ];
+            }
+        }
+
         return response()->json([
-            'settings' => $settings
-        ],200);
+            'status' => true,
+            'data' => $response
+        ]);
     }
  
     public function getSettingDetails(Request $request): JsonResponse
@@ -101,98 +106,189 @@ class CommonController extends Controller
         ],200);
     }
  
-    public function updateSettings(Request $request): JsonResponse
+    // public function updateSettings(Request $request): JsonResponse
+    // {
+    //     if (!$request->user()->can('settings-edit')) {
+    //         return response()->json(['message' => 'Access Denied.'], 403);
+    //     }
+
+    //     $validator = Validator::make($request->all(), [
+    //         'settings' => 'required|array',
+    //         'settings.*.id' => 'required|exists:settings,id',
+    //         'settings.*.key' => 'required|string',
+    //         'settings.*.value' => 'required'
+    //     ]);
+
+    //     if ($validator->fails()) {
+    //         return response()->json([
+    //             'status' => false,
+    //             'errors' => $validator->errors()
+    //         ], 422);
+    //     }
+
+    //     foreach ($request->settings as $index => $settingData) {
+    //         $setting = Settings::find($settingData['id']);
+
+    //         if (!$setting) {
+    //             continue;
+    //         }
+
+    //         $key = $settingData['key'];
+    //         $value = $settingData['value'];
+
+    //         // 🔥 Handle Base64 Image Upload (logo & favicon)
+    //         if (in_array($key, ['logo', 'favicon_icon', 'mini_logo', 'default_logo_dark', 'mini_logo_dark'])) {
+    //             $base64 = $request->input("settings.$index.value");
+
+    //             if ($base64) {
+    //                 // ✅ Detect image type (including svg+xml)
+    //                 if (preg_match('/^data:image\/([a-zA-Z0-9\+\-\.]+);base64,/', $base64, $type)) {
+
+    //                     $image = substr($base64, strpos($base64, ',') + 1);
+    //                     $image = base64_decode($image);
+
+    //                     if ($image === false) {
+    //                         throw new \Exception('Base64 decode failed');
+    //                     }
+
+    //                     // ✅ Fix extension for svg+xml
+    //                     $extension = strtolower($type[1]);
+    //                     if ($extension === 'svg+xml') {
+    //                         $extension = 'svg';
+    //                     }
+
+    //                     // 👉 Allowed extensions
+    //                     if (!in_array($extension, ['jpg', 'jpeg', 'png', 'gif', 'webp', 'ico', 'svg'])) {
+    //                         throw new \Exception('Invalid image type');
+    //                     }
+
+    //                     // 👉 Folder path
+    //                     $folder = public_path('uploads/settings');
+
+    //                     if (!file_exists($folder)) {
+    //                         mkdir($folder, 0755, true);
+    //                     }
+
+    //                     // 👉 Old image delete
+    //                     if ($setting->value && file_exists(public_path($setting->value))) {
+    //                         unlink(public_path($setting->value));
+    //                     }
+
+    //                     // 👉 File name generate
+    //                     $fileName = time() . '_' . uniqid() . '.' . $extension;
+
+    //                     // 👉 Save image
+    //                     file_put_contents($folder . '/' . $fileName, $image);
+
+    //                     // 👉 Save path in DB
+    //                     $value = 'uploads/settings/' . $fileName;
+    //                 }
+    //             }
+    //         }
+
+    //         $setting->update([
+    //             'key' => $key,
+    //             'value' => $value
+    //         ]);
+    //     }
+
+    //     return response()->json([
+    //         'status' => true,
+    //         'message' => 'Settings updated successfully!'
+    //     ], 200);
+    // }
+
+    public function updateSettings(Request $request)
     {
-        if (!$request->user()->can('settings-edit')) {
-            return response()->json(['message' => 'Access Denied.'], 403);
-        }
+        $data = $request->all();
 
-        $validator = Validator::make($request->all(), [
-            'settings' => 'required|array',
-            'settings.*.id' => 'required|exists:settings,id',
-            'settings.*.key' => 'required|string',
-            'settings.*.value' => 'required'
-        ]);
+        foreach ($data as $group => $settings) {
 
-        if ($validator->fails()) {
-            return response()->json([
-                'status' => false,
-                'errors' => $validator->errors()
-            ], 422);
-        }
+            if (!is_array($settings)) continue;
 
-        foreach ($request->settings as $index => $settingData) {
-            $setting = Settings::find($settingData['id']);
+            foreach ($settings as $key => $setting) {
 
-            if (!$setting) {
-                continue;
-            }
+                // 🧠 Handle both formats (old + new)
+                if (is_array($setting) && isset($setting['value'])) {
+                    $value = $setting['value'];
+                    $type  = $setting['type'] ?? 'text';
+                } else {
+                    $value = $setting;
+                    $existing = Settings::where('key', $key)->first();
+                    $type = $existing->type ?? 'text';
+                }
 
-            $key = $settingData['key'];
-            $value = $settingData['value'];
+                $existing = Settings::where('key', $key)->first();
 
-            // 🔥 Handle Base64 Image Upload (logo & favicon)
-            if (in_array($key, ['logo', 'favicon_icon', 'mini_logo', 'default_logo_dark', 'mini_logo_dark'])) {
-                $base64 = $request->input("settings.$index.value");
+                /**
+                 * 🔥 BASE64 IMAGE
+                 */
+                if (!empty($value) && is_string($value) &&
+                    preg_match('/^data:image\/([a-zA-Z0-9\+\-\.]+);base64,/', $value, $typeMatch)
+                ) {
 
-                if ($base64) {
-                    // ✅ Detect image type (including svg+xml)
-                    if (preg_match('/^data:image\/([a-zA-Z0-9\+\-\.]+);base64,/', $base64, $type)) {
+                    $image = base64_decode(substr($value, strpos($value, ',') + 1));
 
-                        $image = substr($base64, strpos($base64, ',') + 1);
-                        $image = base64_decode($image);
+                    if ($image === false) {
+                        return response()->json(['status'=>false,'message'=>'Base64 decode failed'],400);
+                    }
 
-                        if ($image === false) {
-                            throw new \Exception('Base64 decode failed');
-                        }
+                    $extension = strtolower($typeMatch[1]);
+                    if ($extension === 'svg+xml') $extension = 'svg';
 
-                        // ✅ Fix extension for svg+xml
-                        $extension = strtolower($type[1]);
-                        if ($extension === 'svg+xml') {
-                            $extension = 'svg';
-                        }
+                    $folder = public_path('uploads/settings');
+                    if (!file_exists($folder)) mkdir($folder,0755,true);
 
-                        // 👉 Allowed extensions
-                        if (!in_array($extension, ['jpg', 'jpeg', 'png', 'gif', 'webp', 'ico', 'svg'])) {
-                            throw new \Exception('Invalid image type');
-                        }
+                    // delete old
+                    if ($existing && $existing->value && file_exists(public_path($existing->value))) {
+                        unlink(public_path($existing->value));
+                    }
 
-                        // 👉 Folder path
-                        $folder = public_path('uploads/settings');
+                    $fileName = time().'_'.uniqid().'.'.$extension;
+                    file_put_contents($folder.'/'.$fileName, $image);
 
-                        if (!file_exists($folder)) {
-                            mkdir($folder, 0755, true);
-                        }
+                    $value = 'uploads/settings/'.$fileName;
+                    $type = 'file';
+                }
 
-                        // 👉 Old image delete
-                        if ($setting->value && file_exists(public_path($setting->value))) {
-                            unlink(public_path($setting->value));
-                        }
+                /**
+                 * 🔥 MULTIPART FILE
+                 */
+                elseif ($request->hasFile("$group.$key")) {
+                    $value = $request->file("$group.$key")->store('settings','public');
+                    $type = 'file';
+                }
 
-                        // 👉 File name generate
-                        $fileName = time() . '_' . uniqid() . '.' . $extension;
+                /**
+                 * 🔥 AUTO TYPE FALLBACK (optional)
+                 */
+                else {
+                    if ($type === 'toggle') {
+                        $value = filter_var($value, FILTER_VALIDATE_BOOLEAN);
+                    }
 
-                        // 👉 Save image
-                        file_put_contents($folder . '/' . $fileName, $image);
-
-                        // 👉 Save path in DB
-                        $value = 'uploads/settings/' . $fileName;
+                    if ($type === 'json' && is_array($value)) {
+                        $value = json_encode($value);
                     }
                 }
-            }
 
-            $setting->update([
-                'key' => $key,
-                'value' => $value
-            ]);
+                Settings::updateOrCreate(
+                    ['key' => $key],
+                    [
+                        'value' => $value,
+                        'type' => $type,
+                        'group' => $group
+                    ]
+                );
+            }
         }
 
         return response()->json([
             'status' => true,
-            'message' => 'Settings updated successfully!'
-        ], 200);
+            'message' => 'Settings updated successfully'
+        ]);
     }
- 
+    
     public function deshboardCount(Request $request): JsonResponse
     {   
         $authUser = $request->user();
@@ -531,6 +627,129 @@ class CommonController extends Controller
             }
 
             file_put_contents($path, $env);
+        }
+    }
+
+        public function clearCache(): JsonResponse
+    {
+        try {
+            Artisan::call('cache:clear');
+            Artisan::call('route:clear');
+            Artisan::call('config:clear');
+            Artisan::call('view:clear');
+
+             // 👉 AFTER SIZE
+            $afterCache = $this->getFolderSize(storage_path('framework/cache'));
+            $afterView  = $this->getFolderSize(storage_path('framework/views'));
+            $afterLog   = $this->getFolderSize(storage_path('logs'));
+
+            return response()->json([
+                'status' => true,
+                'message' => 'All caches cleared successfully',
+                'data' => [
+                    'after' => [
+                        // 'cache' => $this->formatSize($afterCache),
+                        // 'view'  => $this->formatSize($afterView),
+                        // 'log'   => $this->formatSize($afterLog),
+                        'total' => $this->formatSize($afterCache + $afterView + $afterLog),
+                    ]
+                ]
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => false,
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    private function getFolderSize($path){
+        $size = 0;
+
+        if (!file_exists($path)) {
+            return 0;
+        }
+
+        foreach (new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($path)) as $file) {
+            if ($file->isFile()) {
+                $size += $file->getSize();
+            }
+        }
+
+        return $size;
+    }
+
+    private function formatSize($bytes)
+    {
+        if ($bytes >= 1073741824) {
+            return number_format($bytes / 1073741824, 2) . ' GB';
+        } elseif ($bytes >= 1048576) {
+            return number_format($bytes / 1048576, 2) . ' MB';
+        } elseif ($bytes >= 1024) {
+            return number_format($bytes / 1024, 2) . ' KB';
+        }
+
+        return $bytes . ' B';
+    }
+
+    public function clearRouteCache(): JsonResponse
+    {
+        Artisan::call('route:clear');
+
+        return response()->json([
+            'status' => true,
+            'message' => 'Route cache cleared'
+        ]);
+    }
+
+    public function clearConfigCache(): JsonResponse
+    {
+        Artisan::call('config:clear');
+
+        return response()->json([
+            'status' => true,
+            'message' => 'Config cache cleared'
+        ]);
+    }
+
+    public function clearAppCache(): JsonResponse
+    {
+        Artisan::call('cache:clear');
+
+        return response()->json([
+            'status' => true,
+            'message' => 'Application cache cleared'
+        ]);
+    }
+
+    public function clearViewCache(): JsonResponse
+    {
+        Artisan::call('view:clear');
+
+        return response()->json([
+            'status' => true,
+            'message' => 'View cache cleared'
+        ]);
+    }
+
+    public function clearLogs(): JsonResponse
+    {
+        try {
+            $logPath = storage_path('logs/laravel.log');
+
+            if (file_exists($logPath)) {
+                file_put_contents($logPath, '');
+            }
+
+            return response()->json([
+                'status' => true,
+                'message' => 'Logs cleared'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => false,
+                'message' => $e->getMessage()
+            ], 500);
         }
     }
 

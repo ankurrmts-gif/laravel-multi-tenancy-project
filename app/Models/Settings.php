@@ -20,6 +20,8 @@ class Settings extends Model
     protected $fillable = [
         'key',
         'value',
+        'type',
+        'group',
         'created_at',
         'updated_at',
     ];

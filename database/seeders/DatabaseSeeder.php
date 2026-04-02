@@ -90,23 +90,294 @@ class DatabaseSeeder extends Seeder
             ]
         );
  
-        Settings::insert([
-            ['key' => 'expired_link_duration', 'value' => '2'],
-            ['key' => 'support_email', 'value' => 'manushi.p.mts@gmail.com'],
-            ['key' => 'access_token_expires_in_minutes', 'value' => '1'],
-            ['key' => 'refresh_token_expires_in_minutes', 'value' => '120'],  
-            ['key' => 'login_attempt_seconds', 'value' => '6'],   // gap in seconds
-            ['key' => 'login_attempt_minute', 'value' => '5'],     // per minute
-            ['key' => 'login_attempt_hour', 'value' => '30'],      // per hour
-            ['key' => 'is_2fa_enabled', 'value' => '1'],
-            ['key' => 'login_otp_expired_minutes', 'value' => '5'],
-            ['key' => 'favicon_icon', 'value' => 'uploads/settings/1774937399_69cb65370c2a6.jpeg'],
-            ['key' => 'mini_logo', 'value' => ''],
-            ['key' => 'logo', 'value' => ''],
-            ['key' => 'default_logo_dark', 'value' => ''],
-            ['key' => 'mini_logo_dark', 'value' => ''],
-        ]);
+        // Settings::insert([
+        //     ['key' => 'expired_link_duration', 'value' => '2'],
+        //     ['key' => 'support_email', 'value' => 'manushi.p.mts@gmail.com'],
+        //     ['key' => 'access_token_expires_in_minutes', 'value' => '1'],
+        //     ['key' => 'refresh_token_expires_in_minutes', 'value' => '120'],  
+        //     ['key' => 'login_attempt_seconds', 'value' => '6'],   // gap in seconds
+        //     ['key' => 'login_attempt_minute', 'value' => '5'],     // per minute
+        //     ['key' => 'login_attempt_hour', 'value' => '30'],      // per hour
+        //     ['key' => 'is_2fa_enabled', 'value' => '1'],
+        //     ['key' => 'login_otp_expired_minutes', 'value' => '5'],
+        //     ['key' => 'favicon_icon', 'value' => 'uploads/settings/1774937399_69cb65370c2a6.jpeg'],
+        //     ['key' => 'mini_logo', 'value' => ''],
+        //     ['key' => 'logo', 'value' => ''],
+        //     ['key' => 'default_logo_dark', 'value' => ''],
+        //     ['key' => 'mini_logo_dark', 'value' => ''],
+        // ]);
  
+        Settings::insert([
+            // 🔐 AUTH SETTINGS
+            [
+                'key' => 'expired_link_duration',
+                'value' => '2',
+                'type' => 'number',
+                'group' => 'auth',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'key' => 'access_token_expires_in_minutes',
+                'value' => '5',
+                'type' => 'number',
+                'group' => 'auth',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'key' => 'refresh_token_expires_in_minutes',
+                'value' => '120',
+                'type' => 'number',
+                'group' => 'auth',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'key' => 'login_attempt_seconds',
+                'value' => '6',
+                'type' => 'number',
+                'group' => 'auth',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'key' => 'login_attempt_minute',
+                'value' => '5',
+                'type' => 'number',
+                'group' => 'auth',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'key' => 'login_attempt_hour',
+                'value' => '30',
+                'type' => 'number',
+                'group' => 'auth',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'key' => 'is_2fa_enabled',
+                'value' => '0',
+                'type' => 'toggle',
+                'group' => 'auth',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'key' => 'login_otp_expired_minutes',
+                'value' => '5',
+                'type' => 'number',
+                'group' => 'auth',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+
+            // 🌐 GENERAL SETTINGS
+            [
+                'key' => 'site_name',
+                'value' => 'Metronic',
+                'type' => 'input',
+                'group' => 'general',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'key' => 'site_description',
+                'value' => 'Lorem Ipsum is simply dummy text...',
+                'type' => 'textarea',
+                'group' => 'general',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'key' => 'site_email',
+                'value' => 'ankur.r.mts@gmail.com',
+                'type' => 'input',
+                'group' => 'general',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'key' => 'site_phone',
+                'value' => '+91 1234567890',
+                'type' => 'input',
+                'group' => 'general',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'key' => 'footer_text',
+                'value' => 'Keenthemes Inc.',
+                'type' => 'input',
+                'group' => 'general',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'key' => 'primary_color',
+                'value' => '#1234',
+                'type' => 'color',
+                'group' => 'general',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'key' => 'secondary_color',
+                'value' => '#5678',
+                'type' => 'color',
+                'group' => 'general',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+
+            // 🖼️ FILES
+            [
+                'key' => 'favicon_icon',
+                'value' => 'uploads/settings/f1774604035_69c64f03e7de7.jpeg',
+                'type' => 'file',
+                'group' => 'general',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'key' => 'logo',
+                'value' => 'uploads/settings/1775027152_69ccc3d04ee52.svg',
+                'type' => 'file',
+                'group' => 'general',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'key' => 'mini_logo',
+                'value' => 'uploads/settings/1775027152_69ccc3d04db28.svg',
+                'type' => 'file',
+                'group' => 'general',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'key' => 'default_logo_dark',
+                'value' => 'uploads/settings/1775027152_69ccc3d0504a1.svg',
+                'type' => 'file',
+                'group' => 'general',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'key' => 'mini_logo_dark',
+                'value' => 'uploads/settings/1775027152_69ccc3d051415.svg',
+                'type' => 'file',
+                'group' => 'general',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+
+            // 🔗 SOCIAL MEDIA
+            [
+                'key' => 'facebook',
+                'value' => 'https://www.facebook.com',
+                'type' => 'input',
+                'group' => 'social_media',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'key' => 'instagram',
+                'value' => 'https://www.instagram.com',
+                'type' => 'input',
+                'group' => 'social_media',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'key' => 'x',
+                'value' => 'https://www.x.com',
+                'type' => 'input',
+                'group' => 'social_media',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'key' => 'linkedin',
+                'value' => 'https://www.linkedin.com',
+                'type' => 'input',
+                'group' => 'social_media',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'key' => 'youtube',
+                'value' => 'https://www.youtube.com',
+                'type' => 'input',
+                'group' => 'social_media',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+
+            // 📍 CONTACT INFO
+            [
+                'key' => 'address',
+                'value' => 'address',
+                'type' => 'textarea',
+                'group' => 'contact_info',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'key' => 'google_map_link',
+                'value' => 'google_map_link',
+                'type' => 'input',
+                'group' => 'contact_info',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'key' => 'support_email',
+                'value' => 'ankur.r.mts@gmail.com',
+                'type' => 'input',
+                'group' => 'contact_info',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'key' => 'support_phone',
+                'value' => '+91 1234567890',
+                'type' => 'input',
+                'group' => 'contact_info',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+
+            // 📊 SEO
+            [
+                'key' => 'meta_title',
+                'value' => 'meta_title',
+                'type' => 'input',
+                'group' => 'seo',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'key' => 'meta_description',
+                'value' => 'meta_description',
+                'type' => 'textarea',
+                'group' => 'seo',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'key' => 'meta_keywords',
+                'value' => 'meta_keywords',
+                'type' => 'textarea',
+                'group' => 'seo',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+
+        ]);
+
         /** -------------------------------------------------
          * ASSIGN ROLE TO USER
          * -------------------------------------------------*/

@@ -94,6 +94,12 @@ Route::middleware(\App\Http\Middleware\AuthenticateSanctumMultiTenant::class)->g
     Route::post('add-settings', [CommonController::class, 'addSettings']);
     Route::post('update-settings', [CommonController::class, 'updateSettings']);
 
+    Route::post('/clear-cache', [CommonController::class, 'clearCache']);
+    Route::post('/clear-route-cache', [CommonController::class, 'clearRouteCache']);
+    Route::post('/clear-config-cache', [CommonController::class, 'clearConfigCache']);
+    Route::post('/clear-app-cache', [CommonController::class, 'clearAppCache']);
+    Route::post('/clear-view-cache', [CommonController::class, 'clearViewCache']);
+    Route::post('/clear-logs', [CommonController::class, 'clearLogs']);
     
     Route::get('get-email-templates', [EmailTemplateController::class, 'index']);
     Route::get('get-email-template/{id}', [EmailTemplateController::class, 'show']);
