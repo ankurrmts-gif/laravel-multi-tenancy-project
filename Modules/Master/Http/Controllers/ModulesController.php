@@ -547,7 +547,7 @@ class ModulesController extends Controller
 
     public function show($id)
     {
-        $module = Module::with(['fields.options', 'assignedAdmins', 'assignedAgencies', 'permissions'])->findOrFail($id);
+        $module = Module::with(['fields.options', 'assignedAdmins', 'assignedAgencies'])->findOrFail($id);
         return response()->json(['success' => true, 'data' => $module]);
     }
 
