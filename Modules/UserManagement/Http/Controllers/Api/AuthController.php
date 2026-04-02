@@ -701,6 +701,7 @@ class AuthController extends Controller
             'locked_until' => null
         ]);
 
+        tenancy()->end();
         // 🔐 MFA FLOW
         $response = $this->handleMfaFlow(
             $tenantUser,
@@ -709,7 +710,6 @@ class AuthController extends Controller
             $google2fa
         );
 
-        tenancy()->end();
 
         return $response;
     } 
@@ -875,7 +875,7 @@ class AuthController extends Controller
         |------------------------------------------------------------------
         */
         else {
-
+            tenancy()->end();
             $otpRecord = UserOtp::where([
                 'user_id'   => $user->id,
                 'user_type' => $request->user_type,
@@ -898,6 +898,18 @@ class AuthController extends Controller
 
             // ✅ Delete OTP after success
             $otpRecord->delete();
+
+            if ($request->user_type === 'tenant') {
+                $tenant = Tenant::find($request->tenant_id);
+
+                if (!$tenant) {
+                    return response()->json(['message' => 'Tenant not found'], 404);
+                }
+
+                tenancy()->initialize($tenant);
+            } else {
+                tenancy()->end();
+            }
         }
 
         /*
@@ -916,6 +928,7 @@ class AuthController extends Controller
 
     public function resendOtp(Request $request)
     {
+        tenancy()->end();
         $request->validate([
             'user_id'   => 'required',
             'user_type' => 'required|in:central,tenant',

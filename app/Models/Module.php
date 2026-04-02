@@ -19,6 +19,7 @@ class Module extends Model
         'user_type',
         'order_number',
         'tenant_id',
+        'tenant_user_type',
         'actions',
         'permissions',
         'created_by',

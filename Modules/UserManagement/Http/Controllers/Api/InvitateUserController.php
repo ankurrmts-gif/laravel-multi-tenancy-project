@@ -300,7 +300,9 @@ class InvitateUserController extends Controller
                 'last_name' => $invitation->last_name,
                 'email' => $invitation->email,
                 'created_by' => $invitation->created_by,
+                'user_type' => 'tenant',
                 'email_verified_at' => now(),
+                'tenant_id' => $tenant->id,
                 'password' => Hash::make($request->password),
             ]);
 

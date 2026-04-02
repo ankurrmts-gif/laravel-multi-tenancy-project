@@ -22,6 +22,7 @@ return new class extends Migration
             $table->string('user_type')->nullable(); // Admin or Agency
             $table->integer('order_number')->default(0);
             $table->string('tenant_id')->nullable();
+            $table->text('tenant_user_type')->nullable();
             $table->json('actions')->nullable(); // {"create": true, "edit": true, etc.}
             $table->json('permissions')->nullable();
             $table->unsignedBigInteger('created_by');
