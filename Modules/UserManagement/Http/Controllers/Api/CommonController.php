@@ -352,7 +352,11 @@ class CommonController extends Controller
     }
 
     public function getSmtpSettings()
-    {
+    {   
+        Artisan::call('config:clear');
+        Artisan::call('cache:clear');
+        Artisan::call('config:cache');
+
         return response()->json([
             'status' => true,
             'data' => [
