@@ -6,6 +6,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
 use Illuminate\Support\Facades\Hash;
+use App\Models\SmtpSetting;
 use Illuminate\Validation\ValidationException;
 use Stancl\Tenancy\Exceptions\DomainOccupiedByOtherTenantException;
 use Stancl\Tenancy\Database\Models\Domain as TenancyDomain;
@@ -36,7 +37,13 @@ class CommonController extends Controller
        // if (!$request->user()->can('settings-access')) {
         //     return response()->json(['message' => 'Access Denied.'], 403);
         // }
- 
+        $authUser = $request->user();
+
+        tenancy()->end();
+
+        if($authUser->user_type == 'agency'){
+            tenancy()->initialize($authUser->tenant_id);
+        }
         $settings = Settings::all()->groupBy('group');
 
         $response = [];
@@ -53,6 +60,7 @@ class CommonController extends Controller
                 ];
             }
         }
+        tenancy()->end();
 
         return response()->json([
             'status' => true,
@@ -202,84 +210,178 @@ class CommonController extends Controller
     {
         $data = $request->all();
 
-        foreach ($data as $group => $settings) {
+        $authUser = $request->user();
+        tenancy()->end();
 
-            if (!is_array($settings)) continue;
+        if($authUser->user_type == 'agency'){
+            tenancy()->initialize($authUser->tenant_id);
+            foreach ($data as $group => $settings) {
 
-            foreach ($settings as $key => $setting) {
+                if (!is_array($settings)) continue;
 
-                // 🧠 Handle both formats (old + new)
-                if (is_array($setting) && isset($setting['value'])) {
-                    $value = $setting['value'];
-                    $type  = $setting['type'] ?? 'text';
-                } else {
-                    $value = $setting;
+                foreach ($settings as $key => $setting) {
+
+                    // 🧠 Handle both formats (old + new)
+                    if (is_array($setting) && isset($setting['value'])) {
+                        $value = $setting['value'];
+                        $type  = $setting['type'] ?? 'text';
+                    } else {
+                        $value = $setting;
+                        $existing = Settings::where('key', $key)->first();
+                        $type = $existing->type ?? 'text';
+                    }
+
                     $existing = Settings::where('key', $key)->first();
-                    $type = $existing->type ?? 'text';
-                }
 
-                $existing = Settings::where('key', $key)->first();
+                    /**
+                     * 🔥 BASE64 IMAGE
+                     */
+                    if (!empty($value) && is_string($value) &&
+                        preg_match('/^data:image\/([a-zA-Z0-9\+\-\.]+);base64,/', $value, $typeMatch)
+                    ) {
 
-                /**
-                 * 🔥 BASE64 IMAGE
-                 */
-                if (!empty($value) && is_string($value) &&
-                    preg_match('/^data:image\/([a-zA-Z0-9\+\-\.]+);base64,/', $value, $typeMatch)
-                ) {
+                        $image = base64_decode(substr($value, strpos($value, ',') + 1));
 
-                    $image = base64_decode(substr($value, strpos($value, ',') + 1));
+                        if ($image === false) {
+                            return response()->json(['status'=>false,'message'=>'Base64 decode failed'],400);
+                        }
 
-                    if ($image === false) {
-                        return response()->json(['status'=>false,'message'=>'Base64 decode failed'],400);
+                        $extension = strtolower($typeMatch[1]);
+                        if ($extension === 'svg+xml') $extension = 'svg';
+
+                        $folder = public_path('uploads/settings/tenant_' . $authUser->tenant_id);
+                        if (!file_exists($folder)) mkdir($folder,0755,true);
+
+                        // delete old
+                        if ($existing && $existing->value && file_exists(public_path($existing->value))) {
+                            unlink(public_path($existing->value));
+                        }
+
+                        $fileName = time().'_'.uniqid().'.'.$extension;
+                        file_put_contents($folder.'/'.$fileName, $image);
+
+                        $value = 'uploads/settings/tenant_' . $authUser->tenant_id . '/' . $fileName;
+                        $type = 'file';
                     }
 
-                    $extension = strtolower($typeMatch[1]);
-                    if ($extension === 'svg+xml') $extension = 'svg';
+                    /**
+                     * 🔥 MULTIPART FILE
+                     */
+                   elseif ($request->hasFile("$group.$key")) {
+                        $path = 'settings/tenant_'.$authUser->tenant_id;
 
-                    $folder = public_path('uploads/settings');
-                    if (!file_exists($folder)) mkdir($folder,0755,true);
+                        $value = $request
+                            ->file("$group.$key")
+                            ->store($path, 'public');
 
-                    // delete old
-                    if ($existing && $existing->value && file_exists(public_path($existing->value))) {
-                        unlink(public_path($existing->value));
+                        $type = 'file';
                     }
 
-                    $fileName = time().'_'.uniqid().'.'.$extension;
-                    file_put_contents($folder.'/'.$fileName, $image);
+                    /**
+                     * 🔥 AUTO TYPE FALLBACK (optional)
+                     */
+                    else {
+                        if ($type === 'toggle') {
+                            $value = filter_var($value, FILTER_VALIDATE_BOOLEAN);
+                        }
 
-                    $value = 'uploads/settings/'.$fileName;
-                    $type = 'file';
-                }
-
-                /**
-                 * 🔥 MULTIPART FILE
-                 */
-                elseif ($request->hasFile("$group.$key")) {
-                    $value = $request->file("$group.$key")->store('settings','public');
-                    $type = 'file';
-                }
-
-                /**
-                 * 🔥 AUTO TYPE FALLBACK (optional)
-                 */
-                else {
-                    if ($type === 'toggle') {
-                        $value = filter_var($value, FILTER_VALIDATE_BOOLEAN);
+                        if ($type === 'json' && is_array($value)) {
+                            $value = json_encode($value);
+                        }
                     }
 
-                    if ($type === 'json' && is_array($value)) {
-                        $value = json_encode($value);
-                    }
+                    Settings::updateOrCreate(
+                        ['key' => $key],
+                        [
+                            'value' => $value,
+                            'type' => $type,
+                            'group' => $group
+                        ]
+                    );
                 }
+            }
+             tenancy()->end();
+        }else{
+            tenancy()->end();
+            foreach ($data as $group => $settings) {
 
-                Settings::updateOrCreate(
-                    ['key' => $key],
-                    [
-                        'value' => $value,
-                        'type' => $type,
-                        'group' => $group
-                    ]
-                );
+                if (!is_array($settings)) continue;
+
+                foreach ($settings as $key => $setting) {
+
+                    // 🧠 Handle both formats (old + new)
+                    if (is_array($setting) && isset($setting['value'])) {
+                        $value = $setting['value'];
+                        $type  = $setting['type'] ?? 'text';
+                    } else {
+                        $value = $setting;
+                        $existing = Settings::where('key', $key)->first();
+                        $type = $existing->type ?? 'text';
+                    }
+
+                    $existing = Settings::where('key', $key)->first();
+
+                    /**
+                     * 🔥 BASE64 IMAGE
+                     */
+                    if (!empty($value) && is_string($value) &&
+                        preg_match('/^data:image\/([a-zA-Z0-9\+\-\.]+);base64,/', $value, $typeMatch)
+                    ) {
+
+                        $image = base64_decode(substr($value, strpos($value, ',') + 1));
+
+                        if ($image === false) {
+                            return response()->json(['status'=>false,'message'=>'Base64 decode failed'],400);
+                        }
+
+                        $extension = strtolower($typeMatch[1]);
+                        if ($extension === 'svg+xml') $extension = 'svg';
+
+                        $folder = public_path('uploads/settings');
+                        if (!file_exists($folder)) mkdir($folder,0755,true);
+
+                        // delete old
+                        if ($existing && $existing->value && file_exists(public_path($existing->value))) {
+                            unlink(public_path($existing->value));
+                        }
+
+                        $fileName = time().'_'.uniqid().'.'.$extension;
+                        file_put_contents($folder.'/'.$fileName, $image);
+
+                        $value = 'uploads/settings/'.$fileName;
+                        $type = 'file';
+                    }
+
+                    /**
+                     * 🔥 MULTIPART FILE
+                     */
+                    elseif ($request->hasFile("$group.$key")) {
+                        $value = $request->file("$group.$key")->store('settings','public');
+                        $type = 'file';
+                    }
+
+                    /**
+                     * 🔥 AUTO TYPE FALLBACK (optional)
+                     */
+                    else {
+                        if ($type === 'toggle') {
+                            $value = filter_var($value, FILTER_VALIDATE_BOOLEAN);
+                        }
+
+                        if ($type === 'json' && is_array($value)) {
+                            $value = json_encode($value);
+                        }
+                    }
+
+                    Settings::updateOrCreate(
+                        ['key' => $key],
+                        [
+                            'value' => $value,
+                            'type' => $type,
+                            'group' => $group
+                        ]
+                    );
+                }
             }
         }
 
@@ -455,24 +557,25 @@ class CommonController extends Controller
         ], 200);
     }
 
-    public function getSmtpSettings()
+    public function getSmtpSettings(Request $request)
     {   
         Artisan::call('config:clear');
         Artisan::call('cache:clear');
         Artisan::call('config:cache');
 
+        $authUser = $request->user();
+
+        if($authUser->user_type == 'agency'){
+            tenancy()->initialize($authUser->tenant_id);
+        }
+
+        $SmtpSetting = SmtpSetting::first();
+
+        tenancy()->end();
+
         return response()->json([
             'status' => true,
-            'data' => [
-                'MAIL_MAILER'       => env('MAIL_MAILER'),
-                'MAIL_HOST'         => env('MAIL_HOST'),
-                'MAIL_PORT'         => env('MAIL_PORT'),
-                'MAIL_USERNAME'     => env('MAIL_USERNAME'),
-                'MAIL_PASSWORD'     => env('MAIL_PASSWORD'),
-                'MAIL_ENCRYPTION'   => env('MAIL_ENCRYPTION'),
-                'MAIL_FROM_ADDRESS' => env('MAIL_FROM_ADDRESS'),
-                'MAIL_FROM_NAME'    => env('MAIL_FROM_NAME'),
-            ]
+            'data' => $SmtpSetting
         ]);
     }
 
@@ -490,39 +593,35 @@ class CommonController extends Controller
         ]);
 
         try {
-            $smtpValues = [
-                'MAIL_MAILER'       => $request->MAIL_MAILER,
-                'MAIL_HOST'         => $request->MAIL_HOST,
-                'MAIL_PORT'         => $request->MAIL_PORT,
-                'MAIL_USERNAME'     => $request->MAIL_USERNAME ?? '',
-                'MAIL_PASSWORD'     => $request->MAIL_PASSWORD ?? '',
-                'MAIL_ENCRYPTION'   => $request->MAIL_ENCRYPTION ?? '',
-                'MAIL_FROM_ADDRESS' => $request->MAIL_FROM_ADDRESS,
-                'MAIL_FROM_NAME'    => $request->MAIL_FROM_NAME,
-            ];
+        
+            $authUser = $request->user();
+            
+            tenancy()->end();
 
-            foreach ($smtpValues as $key => $value) {
-                $this->setEnvValue($key, $value);
-                putenv("{$key}={$value}");
-                $_ENV[$key] = $value;
-                $_SERVER[$key] = $value;
+            if($authUser->user_type == 'agency'){
+                tenancy()->initialize($authUser->tenant_id);
             }
 
-            config([
-                'mail.default' => $smtpValues['MAIL_MAILER'],
-                'mail.mailers.smtp.transport' => $smtpValues['MAIL_MAILER'],
-                'mail.mailers.smtp.host' => $smtpValues['MAIL_HOST'],
-                'mail.mailers.smtp.port' => $smtpValues['MAIL_PORT'],
-                'mail.mailers.smtp.username' => $smtpValues['MAIL_USERNAME'],
-                'mail.mailers.smtp.password' => $smtpValues['MAIL_PASSWORD'],
-                'mail.mailers.smtp.encryption' => $smtpValues['MAIL_ENCRYPTION'],
-                'mail.from.address' => $smtpValues['MAIL_FROM_ADDRESS'],
-                'mail.from.name' => $smtpValues['MAIL_FROM_NAME'],
-            ]);
+            $SmtpSetting = SmtpSetting::first();
+            if (!$SmtpSetting) {
+                $SmtpSetting = new SmtpSetting();
+            }
 
-            Artisan::call('config:clear');
-            Artisan::call('cache:clear');
-            Artisan::call('config:cache');
+            $SmtpSetting->mailer = $request->mailer;
+            $SmtpSetting->host = $request->host;
+            $SmtpSetting->port = $request->port;
+            $SmtpSetting->username = $request->username;
+            $SmtpSetting->password = $request->password;
+            $SmtpSetting->encryption = $request->encryption;
+            $SmtpSetting->from_address = $request->from_address;
+            $SmtpSetting->from_name = $request->from_name;
+            $SmtpSetting->save();
+
+             // ✅ Clear cache
+             Artisan::call('config:clear');
+             Artisan::call('cache:clear');
+
+            tenancy()->end();
 
             return response()->json([
                 'status' => true,

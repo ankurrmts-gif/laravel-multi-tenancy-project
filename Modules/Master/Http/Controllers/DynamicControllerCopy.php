@@ -22,7 +22,7 @@ class DynamicController extends Controller
     private function getModule($slug)
     {
         tenancy()->end();
-        return Module::with('assignedAdmins', 'assignedAgencies', 'permissions')
+        return Module::with('permissions')
             ->where('slug', $slug)
             ->firstOrFail();
     }

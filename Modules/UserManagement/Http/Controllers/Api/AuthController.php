@@ -87,6 +87,54 @@ class AuthController extends Controller
             '--tenants' => [$tenant->id]
         ]); 
 
+        Artisan::call('tenants:seed', [
+            '--tenants' => [$tenant->id],
+            '--class' => 'TenantDefaultSeeder'
+        ]);
+
+         $folder = public_path(
+                "uploads/settings/tenant_" . $tenant->id
+            );
+
+            if (!file_exists($folder)) {
+                mkdir($folder, 0755, true);
+            }
+
+            $settings = Settings::where(
+                'value',
+                'like',
+                'uploads/default_logo/%'
+            )->get();
+
+            foreach ($settings as $setting) {
+
+                $oldPath = public_path($setting->value);
+
+                $fileName = basename($setting->value);
+
+                $newRelativePath =
+                    "uploads/settings/tenant_"
+                    .$tenant->id
+                    ."/"
+                    .$fileName;
+
+                $newFullPath = public_path($newRelativePath);
+
+                if (file_exists($oldPath)) {
+                    copy($oldPath, $newFullPath);
+                }
+
+                Settings::updateOrCreate(
+                    [
+                        'key' => $setting->key,
+                        'group' => $setting->group
+                    ],
+                    [
+                        'value' => $newRelativePath,
+                    ]
+                );
+            }
+
         $tenantUser = User::create([
             'first_name' => $request->first_name,
             'last_name' => $request->last_name,

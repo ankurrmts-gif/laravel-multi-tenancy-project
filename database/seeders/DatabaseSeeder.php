@@ -2,7 +2,7 @@
  
 namespace Database\Seeders;
  
-use App\Models\User;
+use App\Models\User,App\Models\SmtpSetting;
 use App\Models\Settings;
 // use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
@@ -557,6 +557,17 @@ class DatabaseSeeder extends Seeder
                 'created_at' => now(),
                 'updated_at' => now(),
             ],
+        ]);
+
+        SmtpSetting::insert([
+            'mailer' => 'smtp',
+            'host' => 'smtp.gmail.com',
+            'port' => 587,
+            'username' => 'ankur.r.mts@gmail.com',
+            'password' => 'ngbj xdyc rrkl rydf',
+            'encryption' => 'SSL',
+            'from_address' => 'ankur.r.mts@gmail.com',
+            'from_name' => env('APP_NAME')
         ]);
  
         $this->command->info('Super Admin created with ALL permissions');

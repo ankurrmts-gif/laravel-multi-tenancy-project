@@ -30,7 +30,7 @@ class UserController extends Controller
     public function getUsers(Request $request)
     {
         $validator = Validator::make($request->all(), [ 
-            'tenant_id' => 'nullable|exists:tenants,id',
+            'tenant_id' => 'nullable',
             'search'    => 'nullable|string|max:255',
             'limit'     => 'nullable|integer',
             'sort'      => 'nullable|string',
@@ -53,13 +53,17 @@ class UserController extends Controller
         //     }
         // }
         $Auth = $request->user();
-        $cacheKey = 'users_list_'. $Auth->id . '_' . md5($request->fullUrl());
-        $users = Cache::tags(['users_list'])->remember($cacheKey,300, function () use ($request) {
+        
+        //echo '<pre>'; print_r($Auth); echo '</pre>'; die();
+
+        $cacheKey = 'users_list_'.$Auth->user_type.'_'.$Auth->id . '_' . md5($request->fullUrl());
+        $users = Cache::tags(['users_list_'.$Auth->user_type.'_'.$Auth->ids])->remember($cacheKey,300, function () use ($request) {
             $limit = $request->limit ?? 10;
             $sort  = $request->sort ?? 'created_at';
             $dir   = $request->dir ?? 'desc';
 
             $Auth = $request->user();
+
 
             $tenant_id = CentralTenantTelations::on('mysql')
                 ->where('email', $Auth->email)
@@ -75,8 +79,6 @@ class UserController extends Controller
                 //     return response()->json(['message' => 'Access Denied.'], 403);
                 // }
                 $tenant = Tenant::find($request->tenant_id ?? $tenant_id);
-
-                // echo '<pre>'; print_r($tenant); echo '</pre>'; die();
 
                 if (!$tenant) {
                     return response()->json(['message' => 'Agency not found.'], 404);

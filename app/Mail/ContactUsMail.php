@@ -5,7 +5,11 @@ namespace App\Mail;
 use Illuminate\Mail\Mailable;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Bus\Queueable;
+use Symfony\Component\Mailer\Transport\Smtp\EsmtpTransport;
+use Symfony\Component\Mailer\Mailer as SymfonyMailer;
+use Illuminate\Mail\Mailer;
 use App\Models\EmailTemplate;
+use App\Models\SmtpSetting;
 
 class ContactUsMail extends Mailable
 {
@@ -34,8 +38,35 @@ class ContactUsMail extends Mailable
             'message'  => $this->data['message'],
         ]);
 
-        return $this->subject($template->subject)
-                    ->html($content);
+        $smtp = SmtpSetting::first();
+
+        $transport = new EsmtpTransport(
+                $smtp->host,
+                $smtp->port,
+                $smtp->encryption
+            );
+
+            $transport->setUsername($smtp->username);
+            $transport->setPassword($smtp->password);
+
+
+            $customMailer = new Mailer(
+                'dynamic',
+                app('view'),
+                $transport, // correct
+                app('events')
+            );
+
+
+            $customMailer->alwaysFrom(
+                $smtp->from_address,
+                $smtp->from_name
+            );
+
+        return $this
+            ->subject($template->subject)
+            ->html($content)
+            ->mailer($customMailer);
     }
 
     private function parseTemplate($content, $data)

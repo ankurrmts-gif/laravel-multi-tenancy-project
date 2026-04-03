@@ -238,6 +238,11 @@ class InvitateUserController extends Controller
                 '--tenants' => [$tenant->id]
             ]);
 
+            Artisan::call('tenants:seed', [
+                '--tenants' => [$tenant->id],
+                '--class' => 'TenantDefaultSeeder'
+            ]);
+
             $user = User::create([
                 'first_name' => $invitation->first_name,
                 'last_name' => $invitation->last_name,

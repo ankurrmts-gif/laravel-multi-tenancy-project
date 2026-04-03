@@ -5,6 +5,7 @@ namespace Modules\Master\Http\Controllers;
 use App\Models\Module,App\Models\ModulePermission;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use App\Models\ModuleField;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
@@ -22,7 +23,7 @@ class DynamicController extends Controller
     private function getModule($slug)
     {
         tenancy()->end();
-        return Module::with('assignedAdmins', 'assignedAgencies', 'permissions')
+        return Module::with('fields.options','permissions')
             ->where('slug', $slug)
             ->firstOrFail();
     }
@@ -46,13 +47,42 @@ class DynamicController extends Controller
     */
     private function handleSingleFile($request, $table, $field)
     {
-        if ($request->hasFile($field->db_column)) {
+        $column = $field->db_column;
 
-            $folder = "public/{$table}";
-            $this->ensureFolder($folder);
+        // ✅ Normal upload
+        if ($request->hasFile($column)) {
+            return $request->file($column)->store($table, 'public');
+        }
 
-            return $request->file($field->db_column)
-                ->store($table, 'public');
+        // ✅ Base64 upload
+        if ($request->has($column)) {
+
+            $base64File = $request->$column;
+
+            if (str_starts_with($base64File, 'data:')) {
+
+                preg_match('/^data:(.*?);base64,/', $base64File, $matches);
+                $mime = $matches[1] ?? 'image/jpeg';
+
+                $fileData = preg_replace('/^data:.*;base64,/', '', $base64File);
+                $fileData = base64_decode($fileData);
+
+                $extension = explode('/', $mime)[1];
+                $fileName = uniqid() . '.' . $extension;
+
+                $folderPath = storage_path("app/public/{$table}");
+
+                // 🔥 FIX: create directory if not exists
+                if (!file_exists($folderPath)) {
+                    mkdir($folderPath, 0777, true);
+                }
+
+                $filePath = "{$table}/{$fileName}";
+
+                file_put_contents(storage_path("app/public/{$filePath}"), $fileData);
+
+                return $filePath;
+            }
         }
 
         return null;
@@ -63,27 +93,85 @@ class DynamicController extends Controller
     | HANDLE MULTIPLE FILES
     |--------------------------------------------------
     */
+
     private function handleMultipleFiles($request, $table, $fk, $field, $recordId)
     {
-        if (!$request->hasFile($field->db_column)) {
-            return [];
-        }
-
-        $folder = "public/{$table}/{$field->db_column}";
-        $this->ensureFolder($folder);
-
+        $column = $field->db_column;
         $filesData = [];
 
-        foreach ($request->file($field->db_column) as $file) {
-            $filesData[] = [
-                "{$fk}_id" => $recordId,
-                'file_name' => $file->getClientOriginalName(),
-                'file_path' => $file->store("{$table}/{$field->db_column}", 'public'),
-                'mime_type' => $file->getMimeType(),
-                'file_size' => $file->getSize(),
-                'created_at' => now(),
-                'updated_at' => now(),
-            ];
+        /*
+        |------------------------------------------
+        | CASE 1: FILE UPLOAD (multipart)
+        |------------------------------------------
+        */
+        if ($request->hasFile($column)) {
+
+            foreach ($request->file($column) as $file) {
+
+                if (!$file->isValid()) continue;
+
+                $filePath = $file->store("{$table}/{$column}", 'public');
+
+                $filesData[] = [
+                    "{$fk}_id" => $recordId,
+                    'file_name' => $file->getClientOriginalName(),
+                    'file_path' => $filePath,
+                    'mime_type' => $file->getMimeType(),
+                    'file_size' => $file->getSize(),
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ];
+            }
+
+            return $filesData; // ✅ IMPORTANT: stop here
+        }
+
+        /*
+        |------------------------------------------
+        | CASE 2: BASE64
+        |------------------------------------------
+        */
+        if ($request->has($column)) {
+
+            $files = $request->input($column); // ✅ use input()
+
+            if (!is_array($files)) {
+                $files = [$files];
+            }
+
+            foreach ($files as $base64File) {
+
+                // ✅ Ensure it's string before using str_starts_with
+                if (!is_string($base64File)) continue;
+
+                if (!str_starts_with($base64File, 'data:')) continue;
+
+                preg_match('/^data:(.*?);base64,/', $base64File, $matches);
+                $mime = $matches[1] ?? 'image/jpeg';
+
+                $fileData = base64_decode(
+                    preg_replace('/^data:.*;base64,/', '', $base64File)
+                );
+
+                if (!$fileData) continue;
+
+                $extension = explode('/', $mime)[1] ?? 'jpg';
+                $fileName = uniqid() . '.' . $extension;
+
+                $filePath = "{$table}/{$column}/{$fileName}";
+
+                Storage::disk('public')->put($filePath, $fileData);
+
+                $filesData[] = [
+                    "{$fk}_id" => $recordId,
+                    'file_name' => $fileName,
+                    'file_path' => $filePath,
+                    'mime_type' => $mime,
+                    'file_size' => strlen($fileData),
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ];
+            }
         }
 
         return $filesData;
@@ -141,7 +229,9 @@ class DynamicController extends Controller
         $module = $this->getModule($slug);
 
         if($user->user_type != 'tenant'){
+             tenancy()->end();
              // ✅ Step 1: Check module-specific permissions
+           
             $modulePermissions = ModulePermission::where([
                 'module_id' => $module->id,
                 'user_id'   => $user->id
@@ -169,6 +259,18 @@ class DynamicController extends Controller
                 ->pluck('name')
                 ->values(); // assuming permission column = name
             }
+            if($module->created_by == $user->id){
+                    $permissionActions = [
+                        1 => 'access',
+                        2 => 'create',
+                        3 => 'edit',
+                        4 => 'show',
+                        5 => 'delete',
+                    ];
+                foreach($permissionActions as $permission){
+                    $module_permission[] = $module->slug . '_' . $permission;
+                }
+             }
         }else{
 
             tenancy()->initialize($user->tenant_id);
@@ -201,8 +303,12 @@ class DynamicController extends Controller
         // latest records
         $data = $query->latest()->paginate(10);
 
+       $fields = ModuleField::select('id','db_column','label','column_type_id','is_multiple','visibility','created_at')->where('module_id', $module->id) 
+            ->get();
+
         // response
         return response()->json([
+            'fields' => $fields,
             'data' => $data,
             'action' => $module->actions,
             'module_permission' => $module_permission
@@ -279,6 +385,9 @@ class DynamicController extends Controller
     {
        $columnType = ColumnTypes::find($type);
 
+       if($columnType->id == 15){
+            return 'photo';
+       }
         return $columnType?->input_type;
     }
 
@@ -295,7 +404,6 @@ class DynamicController extends Controller
         $fk = Str::singular($module->slug);
 
         $data = [];
-
         foreach ($module->fields as $field) {
             $inputType = $field->column_type_id ?? $field->columnType->column_type_id;
 
@@ -397,7 +505,7 @@ class DynamicController extends Controller
                     ->pluck("{$relatedFk}_id")
                     ->toArray();
 
-                $response['relations'][$field->db_column] = [
+                $response['data'][$field->db_column] = [
                     'type' => 'multi_select',
                     'options' => $options,
                     'selected' => $selected
@@ -417,7 +525,7 @@ class DynamicController extends Controller
 
                 $selected = $data->{$field->db_column} ?? null;
 
-                $response['relations'][$field->db_column] = [
+                $response['data'][$field->db_column] = [
                     'type' => 'single_select',
                     'options' => $options,
                     'selected' => $selected
@@ -666,30 +774,32 @@ class DynamicController extends Controller
         foreach ($module->fields as $field) {
 
             $inputType = $field->column_type_id ?? $field->columnType->column_type_id;
+            $column = $field->db_column;
 
             /*
             |------------------------------------------
-            | SINGLE FILE / IMAGE
+            | SINGLE FILE (file + base64)
             |------------------------------------------
             */
             if (in_array($inputType, [14,15]) && !$field->is_multiple) {
 
-                if ($request->hasFile($field->db_column)) {
+                if ($request->hasFile($column) || $request->has($column)) {
 
-                    // 🔥 DELETE OLD FILE
+                    // delete old file
                     $oldFile = DB::table($table)
                         ->where('id', $id)
-                        ->value($field->db_column);
+                        ->value($column);
 
                     if ($oldFile && Storage::disk('public')->exists($oldFile)) {
                         Storage::disk('public')->delete($oldFile);
                     }
 
-                    // 🔥 UPLOAD NEW FILE
-                    $path = $request->file($field->db_column)
-                        ->store($table, 'public');
+                    // upload new file
+                    $path = $this->handleSingleFile($request, $table, $field);
 
-                    $data[$field->db_column] = $path;
+                    if ($path) {
+                        $data[$column] = $path;
+                    }
                 }
 
                 continue;
@@ -702,10 +812,7 @@ class DynamicController extends Controller
             */
             if ($field->is_multiple && !$field->model_name && $inputType == 3) {
 
-                $data[$field->db_column] = json_encode(
-                    $request->{$field->db_column} ?? []
-                );
-
+                $data[$column] = json_encode($request->{$column} ?? []);
                 continue;
             }
 
@@ -716,80 +823,48 @@ class DynamicController extends Controller
             */
             if (!$field->is_multiple && !$field->model_name) {
 
-                $data[$field->db_column] = $request->{$field->db_column};
+                $data[$column] = $request->{$column};
             }
         }
 
-        // ✅ UPDATE MAIN TABLE
+        // update main table
         $data['updated_at'] = now();
         DB::table($table)->where('id', $id)->update($data);
 
         /*
         |--------------------------------------------------
-        | MULTIPLE FILES (DELETE ONLY IF NEW UPLOADED)
+        | MULTIPLE FILES (file + base64)
         |--------------------------------------------------
         */
         foreach ($module->fields as $field) {
 
             $inputType = $field->column_type_id ?? $field->columnType->column_type_id;
+            $column = $field->db_column;
 
             if (in_array($inputType, [14,15]) && $field->is_multiple) {
 
-                $attachTable = "{$table}_" . Str::plural($field->db_column);
+                $attachTable = "{$table}_" . Str::plural($column);
 
-                // ✅ Get uploaded files (handles photos[])
-                $files = $request->file($field->db_column);
+                if ($request->hasFile($column) || $request->has($column)) {
 
-                if (!empty($files)) {
-
-                    /*
-                    |------------------------------------------
-                    | DELETE OLD FILES FROM STORAGE
-                    |------------------------------------------
-                    */
+                    // delete old files
                     $oldFiles = DB::table($attachTable)
                         ->where("{$fk}_id", $id)
                         ->get();
 
                     foreach ($oldFiles as $file) {
-
                         if (!empty($file->file_path) &&
                             Storage::disk('public')->exists($file->file_path)) {
-
                             Storage::disk('public')->delete($file->file_path);
                         }
                     }
 
-                    /*
-                    |------------------------------------------
-                    | DELETE OLD DB RECORDS
-                    |------------------------------------------
-                    */
                     DB::table($attachTable)
                         ->where("{$fk}_id", $id)
                         ->delete();
 
-                    /*
-                    |------------------------------------------
-                    | INSERT NEW FILES
-                    |------------------------------------------
-                    */
-                    $filesData = [];
-
-                    foreach ($files as $file) {
-
-                        $path = $file->store($table . '/' . $field->db_column, 'public');
-
-                        $filesData[] = [
-                            "{$fk}_id" => $id,
-                            'file_name' => $file->getClientOriginalName(),
-                            'file_path' => $path,
-                            'mime_type' => $file->getClientMimeType(),
-                            'file_size' => $file->getSize(),
-                            'created_at' => now(),
-                            'updated_at' => now(),
-                        ];
-                    }
+                    // insert new files
+                    $filesData = $this->handleMultipleFiles($request, $table, $fk, $field, $id);
 
                     if (!empty($filesData)) {
                         DB::table($attachTable)->insert($filesData);
@@ -814,12 +889,12 @@ class DynamicController extends Controller
                 sort($tables);
                 $pivot = implode('_', $tables);
 
-                // 🔥 DELETE OLD
+                // delete old
                 DB::table($pivot)
                     ->where("{$fk}_id", $id)
                     ->delete();
 
-                // 🔥 INSERT NEW
+                // insert new
                 $values = $request->{$field->db_column} ?? [];
 
                 $insertData = [];

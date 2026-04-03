@@ -59,8 +59,11 @@ class ModulesController extends Controller
             $user = $request->user();
             tenancy()->end();
             
-
-            $modules = Module::with(['permissions'])->where('status', true)->orderBy('order_number')->get();
+            if($user->user_type == 'tenant'){
+                $modules = Module::with(['permissions'])->where('status', true)->where('tenant_id', $user->tenant_id)->orderBy('order_number')->get();
+            }else{
+                $modules = Module::with(['permissions'])->where('status', true)->orderBy('order_number')->get();
+            }
 
             $allowed = $modules;
 

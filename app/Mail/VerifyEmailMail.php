@@ -8,6 +8,10 @@ use Illuminate\Bus\Queueable;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Carbon;
 use App\Models\EmailTemplate;
+use Symfony\Component\Mailer\Transport\Smtp\EsmtpTransport;
+use Symfony\Component\Mailer\Mailer as SymfonyMailer;
+use Illuminate\Mail\Mailer;
+use App\Models\SmtpSetting;
 
 class VerifyEmailMail extends Mailable
 {
@@ -42,8 +46,41 @@ class VerifyEmailMail extends Mailable
             'year' => date('Y'),
         ]);
 
-        return $this->subject($template->subject)
-                    ->html($content);
+        if($this->user->user_type == 'tenant' && $this->user->tenant_id) {
+            tenancy()->initialize($this->user->tenant_id);
+                $smtp = SmtpSetting::first();
+            tenancy()->end();
+        } else {
+            $smtp = SmtpSetting::first();
+        }
+
+            $transport = new EsmtpTransport(
+                $smtp->host,
+                $smtp->port,
+                $smtp->encryption
+            );
+
+            $transport->setUsername($smtp->username);
+            $transport->setPassword($smtp->password);
+
+
+            $customMailer = new Mailer(
+                'dynamic',
+                app('view'),
+                $transport, // correct
+                app('events')
+            );
+
+
+            $customMailer->alwaysFrom(
+                $smtp->from_address,
+                $smtp->from_name
+            );
+
+        return $this
+            ->subject($template->subject)
+            ->html($content)
+            ->mailer($customMailer);
     }
 
     // ✅ Generate URL (tenant + normal)
