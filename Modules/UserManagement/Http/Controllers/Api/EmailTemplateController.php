@@ -61,6 +61,8 @@ class EmailTemplateController extends Controller
             'subject' => 'required|string|max:255',
             'slug' => 'required|unique:email_tamplate,slug',
             'content' => 'required|string',
+            'variable' => 'nullable|array',
+
         ]);
 
         if ($validator->fails()) {
@@ -72,6 +74,7 @@ class EmailTemplateController extends Controller
             'subject' => $request->subject,
             'slug' => $request->slug,
             'content' => $request->content,
+            'variable' => $request->variable,
         ]);
 
         return response()->json([
