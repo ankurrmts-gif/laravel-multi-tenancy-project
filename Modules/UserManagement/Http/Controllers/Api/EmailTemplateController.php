@@ -24,7 +24,24 @@ class EmailTemplateController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
-        $emailTemplates = EmailTemplate::all();
+        $query = EmailTemplate::query();
+
+        // 🔍 Search (by name, subject, or content)
+        if ($request->filled('search')) {
+            $search = $request->search;
+
+            $query->where(function ($q) use ($search) {
+                $q->where('title', 'like', "%{$search}%")
+                ->orWhere('subject', 'like', "%{$search}%")
+                ->orWhere('slug', 'like', "%{$search}%");
+            });
+        }
+
+        // 📄 Pagination (default 10)
+        $perPage = $request->get('per_page', 10);
+
+        $emailTemplates = $query->paginate($perPage);
+
         return response()->json($emailTemplates);
     }
 
