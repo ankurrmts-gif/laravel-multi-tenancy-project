@@ -92,48 +92,15 @@ class AuthController extends Controller
             '--class' => 'TenantDefaultSeeder'
         ]);
 
-            // $folder = public_path(
-            //     "uploads/settings/tenant_" . $tenant->id
-            // );
+            $folder = public_path(
+                "uploads/settings/tenant_" . $tenant->id
+            );
 
-            // if (!file_exists($folder)) {
-            //     mkdir($folder, 0755, true);
-            // }
+            if (!file_exists($folder)) {
+                mkdir($folder, 0777, true);
+            }
 
-            // $settings = Settings::where(
-            //     'value',
-            //     'like',
-            //     'uploads/default_logo/%'
-            // )->get();
-
-            // foreach ($settings as $setting) {
-
-            //     $oldPath = public_path($setting->value);
-
-            //     $fileName = basename($setting->value);
-
-            //     $newRelativePath =
-            //         "uploads/settings/tenant_"
-            //         .$tenant->id
-            //         ."/"
-            //         .$fileName;
-
-            //     $newFullPath = public_path($newRelativePath);
-
-            //     if (file_exists($oldPath)) {
-            //         copy($oldPath, $newFullPath);
-            //     }
-
-            //     Settings::updateOrCreate(
-            //         [
-            //             'key' => $setting->key,
-            //             'group' => $setting->group
-            //         ],
-            //         [
-            //             'value' => $newRelativePath,
-            //         ]
-            //     );
-            // }
+           
 
         $tenantUser = User::create([
             'first_name' => $request->first_name,
@@ -142,11 +109,6 @@ class AuthController extends Controller
             'password' => Hash::make($request->password),
             'user_type' => 'agency',
             'tenant_id' => $tenant->id
-        ]);
-
-        $role = Role::firstOrCreate([
-            'name' => 'agency',
-            'guard_name' => 'sanctum'
         ]);
 
         // $permissions = $this->getPermissionsForRole('agency');
@@ -175,6 +137,41 @@ class AuthController extends Controller
         Mail::to($tenantUser->email)->send(new \App\Mail\VerifyEmailMail($tenantUser));
 
         tenancy()->initialize($tenant);
+            $settings = Settings::where('type', 'file')->get();
+
+            foreach ($settings as $setting) {
+
+                if (empty($setting->value)) {
+                    continue;
+                }
+
+                $oldPath = public_path(ltrim($setting->value, '/'));
+
+                if (!file_exists($oldPath)) {
+                    continue;
+                }
+
+                $fileName = basename($setting->value);
+
+                $newRelativePath = "uploads/settings/tenant_" . $tenant->id . "/" . $fileName;
+
+                $newFullPath = public_path($newRelativePath);
+
+                // create folder if not exists
+                if (!file_exists(dirname($newFullPath))) {
+                    mkdir(dirname($newFullPath), 0777, true);
+                }
+
+                // copy file
+                if (!copy($oldPath, $newFullPath)) {
+                    continue;
+                }
+
+                // ✅ IMPORTANT: update existing row
+                $setting->update([
+                    'value' => $newRelativePath
+                ]);
+            }
         $allPermissions = collect([
             'agent-access',
             'agent-create',

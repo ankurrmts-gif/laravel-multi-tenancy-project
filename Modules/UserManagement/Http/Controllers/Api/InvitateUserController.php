@@ -243,6 +243,14 @@ class InvitateUserController extends Controller
                 '--class' => 'TenantDefaultSeeder'
             ]);
 
+            $folder = public_path(
+                "uploads/settings/tenant_" . $tenant->id
+            );
+
+            if (!file_exists($folder)) {
+                mkdir($folder, 0777, true);
+            }
+
             $user = User::create([
                 'first_name' => $invitation->first_name,
                 'last_name' => $invitation->last_name,
@@ -265,6 +273,41 @@ class InvitateUserController extends Controller
             $user->assignRole($role);
 
             tenancy()->initialize($tenant);
+            $settings = Settings::where('type', 'file')->get();
+
+            foreach ($settings as $setting) {
+
+                if (empty($setting->value)) {
+                    continue;
+                }
+
+                $oldPath = public_path(ltrim($setting->value, '/'));
+
+                if (!file_exists($oldPath)) {
+                    continue;
+                }
+
+                $fileName = basename($setting->value);
+
+                $newRelativePath = "uploads/settings/tenant_" . $tenant->id . "/" . $fileName;
+
+                $newFullPath = public_path($newRelativePath);
+
+                // create folder if not exists
+                if (!file_exists(dirname($newFullPath))) {
+                    mkdir(dirname($newFullPath), 0777, true);
+                }
+
+                // copy file
+                if (!copy($oldPath, $newFullPath)) {
+                    continue;
+                }
+
+                // ✅ IMPORTANT: update existing row
+                $setting->update([
+                    'value' => $newRelativePath
+                ]);
+            }
             $allPermissions = collect([
                 'user-access',
                 'user-create',

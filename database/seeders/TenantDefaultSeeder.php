@@ -65,7 +65,7 @@ class TenantDefaultSeeder extends Seeder
             // 🖼️ FILES
             [
                 'key' => 'favicon_icon',
-                'value' => 'uploads/defalut_logo/f1774604035_69c64f03e7de7.jpeg',
+                'value' => 'uploads/defalut_logo/1774604035_69c64f03e7de7.jpeg',
                 'type' => 'file',
                 'group' => 'general',
                 'created_at' => now(),
