@@ -6,6 +6,7 @@ use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Artisan;
 
 class VerifyRecaptcha
 {
@@ -20,6 +21,10 @@ class VerifyRecaptcha
         }
 
         try {
+
+            Artisan::call('config:clear');
+            Artisan::call('cache:clear');
+            Artisan::call('config:cache');
 
             // 2️⃣ Verify with Google
             $response = Http::asForm()

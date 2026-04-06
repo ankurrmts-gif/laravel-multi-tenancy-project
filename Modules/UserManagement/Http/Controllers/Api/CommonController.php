@@ -29,6 +29,7 @@ use Illuminate\Support\Facades\Crypt;
 use Illuminate\Validation\Rule;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Schema;
+use App\Models\DatatableSetting;
  
 class CommonController extends Controller
 {  
@@ -582,18 +583,18 @@ class CommonController extends Controller
     public function updateSmtp(Request $request)
     {
         $request->validate([
-            'MAIL_MAILER'       => 'required|string',
-            'MAIL_HOST'         => 'required|string',
-            'MAIL_PORT'         => 'required|numeric',
-            'MAIL_USERNAME'     => 'nullable|string',
-            'MAIL_PASSWORD'     => 'nullable|string',
-            'MAIL_ENCRYPTION'   => 'nullable|string',
-            'MAIL_FROM_ADDRESS' => 'required|email',
-            'MAIL_FROM_NAME'    => 'required|string',
+            'mailer'       => 'required|string',
+            'host'         => 'required|string',
+            'port'         => 'required|numeric',
+            'username'     => 'nullable|string',
+            'password'     => 'nullable|string',
+            'encryption'   => 'nullable|string',
+            'from_address' => 'required|email',
+            'from_name'    => 'required|string',
         ]);
 
         try {
-        
+
             $authUser = $request->user();
             
             tenancy()->end();
@@ -850,6 +851,150 @@ class CommonController extends Controller
                 'message' => $e->getMessage()
             ], 500);
         }
+    }
+
+     // ✅ Get Settings
+    public function getSettings(Request $request, $table)
+    {
+        $setting = DatatableSetting::where('table_key', $table)->first();
+
+        if ($setting && !empty($setting->settings)) {
+
+            $settings = is_array($setting->settings)
+                ? $setting->settings
+                : json_decode($setting->settings, true);
+
+            // json_decode fail thay to fallback
+            if (json_last_error() === JSON_ERROR_NONE && !empty($settings)) {
+                return response()->json([
+                    'settings' => $settings
+                ]);
+            }
+        }
+
+        // fallback only when no valid data
+        return response()->json([
+            'settings' => $this->defaultSettings()
+        ]);
+    }
+
+    // ✅ Save Settings
+    public function saveSettings(Request $request, $table)
+    {
+        $validated = $request->validate([
+            'sort.field'        => 'required|string',
+            'sort.order'        => 'required|in:asc,desc',
+
+            'columns'           => 'required|array',
+            'columns.*.key'     => 'required|string',
+            'columns.*.label'   => 'required|string',
+            'columns.*.visible' => 'required|boolean',
+
+            // ✅ ADD THIS
+            'export'            => 'required|array',
+            'export.csv'        => 'required|boolean',
+            'export.excel'      => 'required|boolean',
+            'export.pdf'        => 'required|boolean',
+
+            'pagination'        => 'required|integer',
+            'search_status'     => 'required|boolean',
+            'filter_status'     => 'required|boolean',
+        ]);
+
+        DatatableSetting::updateOrCreate(
+            [
+                'table_key' => $table
+            ],
+            [
+                'settings' => json_encode($validated)
+            ]
+        );
+
+        return response()->json([
+            'status' => true,
+            'message' => 'Datatable settings saved successfully'
+        ]);
+    }
+
+    // ✅ Datatable Data
+    public function getData(Request $request, $table)
+    {
+        $query = $this->getQuery($table);
+
+        // 🔍 Search
+        if ($request->search) {
+            $query->where(function ($q) use ($request) {
+                foreach ($request->searchable_columns ?? [] as $col) {
+                    $q->orWhere($col, 'like', "%{$request->search}%");
+                }
+            });
+        }
+
+        // 🎯 Filters
+        if ($request->filters) {
+            foreach ($request->filters as $key => $value) {
+                if ($value !== null) {
+                    $query->where($key, $value);
+                }
+            }
+        }
+
+        // 🔃 Sorting
+        if ($request->sort_field) {
+            $query->orderBy($request->sort_field, $request->sort_order ?? 'asc');
+        }
+
+        return response()->json(
+            $query->paginate($request->per_page ?? 10)
+        );
+    }
+
+    // 🧠 Dynamic Query Resolver
+    private function getQuery($table)
+    {
+        return match ($table) {
+            'users' => User::query(),
+            'products' => Product::query(),
+            default => $this->dynamicModuleQuery($table),
+        };
+    }
+
+    private function dynamicModuleQuery($table)
+    {
+        return DB::table($table); // dynamic table
+    }
+
+    // 🧩 Default Settings
+    private function defaultSettings()
+    {
+        return [
+            "sort" => [
+                "field" => "id",
+                "order" => "desc"
+            ],
+            "columns" => [
+                [
+                    "key" => "id",
+                    "label" => "ID",
+                    "visible" => true
+                ], [
+                    "key" => "created_at",
+                    "label" => "Created At",
+                    "visible" => true
+                ], [
+                    "key" => "updated_at",
+                    "label" => "Updated At",
+                    "visible" => true
+                ], [
+                    "key" => "action",
+                    "label" => "Action",
+                    "visible" => true
+                ]
+            ],
+            "pagination" => 10,
+            "search_status" => 1,
+            "filter_status" => 0
+        ];
     }
 
 }

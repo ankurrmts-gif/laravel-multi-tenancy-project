@@ -92,15 +92,13 @@ class AuthController extends Controller
             '--class' => 'TenantDefaultSeeder'
         ]);
 
-            $folder = public_path(
-                "uploads/settings/tenant_" . $tenant->id
-            );
+        $folder = public_path(
+            "uploads/settings/tenant_" . $tenant->id
+        );
 
-            if (!file_exists($folder)) {
-                mkdir($folder, 0777, true);
-            }
-
-           
+        if (!file_exists($folder)) {
+            mkdir($folder, 0777, true);
+        }
 
         $tenantUser = User::create([
             'first_name' => $request->first_name,
@@ -114,7 +112,7 @@ class AuthController extends Controller
         // $permissions = $this->getPermissionsForRole('agency');
         // $role->syncPermissions($permissions);
 
-        $tenantUser->assignRole($role);
+        // $tenantUser->assignRole($role);
 
         // Access Token (15 minutes)
         // $token = $tenantUser->createToken('auth-token', ['*'], now()->addMinutes(10))->plainTextToken;
@@ -137,47 +135,44 @@ class AuthController extends Controller
         Mail::to($tenantUser->email)->send(new \App\Mail\VerifyEmailMail($tenantUser));
 
         tenancy()->initialize($tenant);
-            $settings = Settings::where('type', 'file')->get();
+        $settings = Settings::where('type', 'file')->get();
 
-            foreach ($settings as $setting) {
-
-                if (empty($setting->value)) {
-                    continue;
-                }
-
-                $oldPath = public_path(ltrim($setting->value, '/'));
-
-                if (!file_exists($oldPath)) {
-                    continue;
-                }
-
-                $fileName = basename($setting->value);
-
-                $newRelativePath = "uploads/settings/tenant_" . $tenant->id . "/" . $fileName;
-
-                $newFullPath = public_path($newRelativePath);
-
-                // create folder if not exists
-                if (!file_exists(dirname($newFullPath))) {
-                    mkdir(dirname($newFullPath), 0777, true);
-                }
-
-                // copy file
-                if (!copy($oldPath, $newFullPath)) {
-                    continue;
-                }
-
-                // ✅ IMPORTANT: update existing row
-                $setting->update([
-                    'value' => $newRelativePath
-                ]);
+        foreach ($settings as $setting) {
+            if (empty($setting->value)) {
+                continue;
             }
+
+            $oldPath = public_path(ltrim($setting->value, '/'));
+            if (!file_exists($oldPath)) {
+                continue;
+            }
+
+            $fileName = basename($setting->value);
+            $newRelativePath = "uploads/settings/tenant_" . $tenant->id . "/" . $fileName;
+            $newFullPath = public_path($newRelativePath);
+
+            // create folder if not exists
+            if (!file_exists(dirname($newFullPath))) {
+                mkdir(dirname($newFullPath), 0777, true);
+            }
+
+            // copy file
+            if (!copy($oldPath, $newFullPath)) {
+                continue;
+            }
+
+            // ✅ IMPORTANT: update existing row
+            $setting->update([
+                'value' => $newRelativePath
+            ]);
+        }
+
         $allPermissions = collect([
-            'agent-access',
-            'agent-create',
-            'agent-edit',
-            'agent-show',
-            'agent-delete',
+            'user-access',
+            'user-create',
+            'user-edit',
+            'user-show',
+            'user-delete',
         ])->map(function ($permission) {
             return Permission::firstOrCreate([
                 'name' => $permission,
@@ -218,7 +213,6 @@ class AuthController extends Controller
             ], 400);
         }
 
-       
         Mail::to($user->email)->send(new \App\Mail\VerifyEmailMail($user));
 
         return response()->json([
@@ -713,7 +707,6 @@ class AuthController extends Controller
 
         // ❌ Wrong Password
         if (!Hash::check($request->password, $tenantUser->password)) {
-
             $tenantUser->failed_attempts++;
 
             if ($tenantUser->failed_attempts >= 3) {
@@ -755,7 +748,6 @@ class AuthController extends Controller
             $tenant->id,
             $google2fa
         );
-
 
         return $response;
     } 

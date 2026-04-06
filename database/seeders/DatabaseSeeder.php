@@ -110,7 +110,7 @@ class DatabaseSeeder extends Seeder
         Settings::insert([
             // 🔐 AUTH SETTINGS
             [
-                'key' => 'expired_link_duration',
+                'key' => 'expired_link_duration_in_minutes',
                 'value' => '2',
                 'type' => 'number',
                 'group' => 'auth',
@@ -184,14 +184,6 @@ class DatabaseSeeder extends Seeder
                 'updated_at' => now(),
             ],
             [
-                'key' => 'site_description',
-                'value' => 'Lorem Ipsum is simply dummy text...',
-                'type' => 'textarea',
-                'group' => 'general',
-                'created_at' => now(),
-                'updated_at' => now(),
-            ],
-            [
                 'key' => 'site_email',
                 'value' => 'ankur.r.mts@gmail.com',
                 'type' => 'input',
@@ -231,11 +223,19 @@ class DatabaseSeeder extends Seeder
                 'created_at' => now(),
                 'updated_at' => now(),
             ],
+            [
+                'key' => 'site_description',
+                'value' => 'Lorem Ipsum is simply dummy text...',
+                'type' => 'textarea',
+                'group' => 'general',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
 
             // 🖼️ FILES
             [
                 'key' => 'favicon_icon',
-                'value' => 'uploads/settings/1774604035_69c64f03e7de7.jpeg',
+                'value' => 'uploads/settings/1775466443_69d377cbbf230.jpeg',
                 'type' => 'file',
                 'group' => 'general',
                 'created_at' => now(),
