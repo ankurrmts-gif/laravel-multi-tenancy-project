@@ -115,6 +115,10 @@ Route::middleware(\App\Http\Middleware\AuthenticateSanctumMultiTenant::class)->g
 
     Route::get('/recaptcha-settings', [CommonController::class, 'getRecaptchaSettings']);
     Route::post('/update-recaptcha-settings', [CommonController::class, 'updateRecaptchaSettings']);
+
+    Route::get('/datatable-settings/{table}', [CommonController::class, 'getSettings']);
+    Route::post('/datatable-settings/{table}', [CommonController::class, 'saveSettings']);
+    Route::post('/datatable/{table}', [CommonController::class, 'getData']);
     
     // Route::prefix('modules')->group(function () {
     //     Route::post('/', [ModuleController::class, 'store']);

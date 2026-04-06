@@ -23,7 +23,11 @@ use Illuminate\Validation\Rule;
 class EmailTemplateController extends Controller
 {
     public function index(Request $request): JsonResponse
-    {
+    {   
+        $limit = $request->limit ?? 10;
+        $sort  = $request->sort ?? 'created_at';
+        $dir   = $request->dir ?? 'desc';
+
         $query = EmailTemplate::query();
 
         // 🔍 Search (by name, subject, or content)
@@ -32,15 +36,11 @@ class EmailTemplateController extends Controller
 
             $query->where(function ($q) use ($search) {
                 $q->where('title', 'like', "%{$search}%")
-                ->orWhere('subject', 'like', "%{$search}%")
-                ->orWhere('slug', 'like', "%{$search}%");
+                ->orWhere('subject', 'like', "%{$search}%");
             });
         }
 
-        // 📄 Pagination (default 10)
-        $perPage = $request->get('per_page', 10);
-
-        $emailTemplates = $query->paginate($perPage);
+        $emailTemplates = $query->orderBy($sort, $dir)->paginate($limit);
 
         return response()->json($emailTemplates);
     }
@@ -62,7 +62,6 @@ class EmailTemplateController extends Controller
             'slug' => 'required|unique:email_tamplate,slug',
             'content' => 'required|string',
             'variable' => 'nullable|array',
-
         ]);
 
         if ($validator->fails()) {
@@ -110,5 +109,4 @@ class EmailTemplateController extends Controller
             'data' => $emailTemplate
         ]);
     }
-
 }
