@@ -208,6 +208,7 @@ class UserController extends Controller
             'last_name'  => 'nullable|string',
             'email' => 'nullable|email|max:255',
             'tenant_id' => 'nullable|string|exists:tenants,id',
+            'role_id' => 'nullable|integer',
         ]);
  
         if ($validator->fails()) {
@@ -236,6 +237,14 @@ class UserController extends Controller
                 'last_name'  => $request->last_name ?? $user->last_name,
                 'email' => $request->email ?? $user->email,
             ]);
+
+            if ($request->filled('role_id')) {
+                $role = Role::find($request->role_id);
+
+                if ($role) {
+                    $user->syncRoles([$role->name]);
+                }
+            }
  
             tenancy()->end();
  
@@ -265,6 +274,14 @@ class UserController extends Controller
                 'last_name'  => $request->last_name ?? $user->last_name,
                 'email' => $request->email ?? $user->email,
             ]);
+
+            if ($request->filled('role_id')) {
+                $role = Role::find($request->role_id);
+
+                if ($role) {
+                    $user->syncRoles([$role->name]);
+                }
+            }
  
             if ($request->filled('agency_name') && $user->tenant_id) {
                 $tenant = Tenant::find($user->tenant_id);
