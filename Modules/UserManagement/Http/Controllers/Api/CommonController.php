@@ -43,7 +43,7 @@ class CommonController extends Controller
 
         tenancy()->end();
 
-        if($authUser->user_type == 'agency' || $authUser->user_type == 'tenant'){
+        if(($request->type == 'primary-data' && $authUser->user_type == 'agency') || $authUser->user_type == 'tenant'){
             tenancy()->initialize($authUser->tenant_id);
         }
         $settings = Settings::all()->groupBy('group');
