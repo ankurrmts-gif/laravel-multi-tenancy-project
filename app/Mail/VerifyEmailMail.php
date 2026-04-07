@@ -46,41 +46,9 @@ class VerifyEmailMail extends Mailable
             'year' => date('Y'),
         ]);
 
-        if($this->user->user_type == 'tenant' && $this->user->tenant_id) {
-            tenancy()->initialize($this->user->tenant_id);
-                $smtp = SmtpSetting::first();
-            tenancy()->end();
-        } else {
-            $smtp = SmtpSetting::first();
-        }
-
-            $transport = new EsmtpTransport(
-                $smtp->host,
-                $smtp->port,
-                $smtp->encryption
-            );
-
-            $transport->setUsername($smtp->username);
-            $transport->setPassword($smtp->password);
-
-
-            $customMailer = new Mailer(
-                'dynamic',
-                app('view'),
-                $transport, // correct
-                app('events')
-            );
-
-
-            $customMailer->alwaysFrom(
-                $smtp->from_address,
-                $smtp->from_name
-            );
-
         return $this
-            ->subject($template->subject)
-            ->html($content)
-            ->mailer($customMailer);
+        ->subject($template->subject)
+        ->html($content);
     }
 
     // ✅ Generate URL (tenant + normal)

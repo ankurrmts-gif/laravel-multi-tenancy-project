@@ -7,6 +7,7 @@ use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
 use Illuminate\Support\Facades\Hash;
 use App\Models\SmtpSetting;
+use App\Support\TenantMailer;
 use Illuminate\Validation\ValidationException;
 use Stancl\Tenancy\Exceptions\DomainOccupiedByOtherTenantException;
 use Stancl\Tenancy\Database\Models\Domain as TenancyDomain;
@@ -545,6 +546,9 @@ class CommonController extends Controller
 
         $EmailId = Settings::where('key', 'support_email')->first();
 
+        $user = User::where('user_type', 'super_admin')->first();
+
+        TenantMailer::apply($user);
         Mail::to($EmailId->value)
             ->send(new \App\Mail\ContactUsMail([
                 'name' => $request->name,

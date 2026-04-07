@@ -6,6 +6,7 @@ use App\Models\User;
 use App\Models\Settings;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use App\Support\TenantMailer;
 use Illuminate\Routing\Controller;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
@@ -53,7 +54,7 @@ class InvitateUserController extends Controller
             return response()->json(['errors' => $validator->errors()], 422);
         }
  
-        $Settings = Settings::where('key','expired_link_duration')->first();
+        $Settings = Settings::where('key','expired_link_duration_in_minutes')->first();
         $expireDays = (int)$Settings->value ?? 1;
 
         if($user->user_type === 'super_admin'){
@@ -91,7 +92,8 @@ class InvitateUserController extends Controller
         $encrypted = Crypt::encryptString(json_encode($payload));
  
         $frontendUrl = config('app.frontend_url'). 'accept-invitation?data=' . urlencode($encrypted);
-        
+
+        TenantMailer::apply($invitation);
         // Send email once
         Mail::to($request->email)->send(new \App\Mail\UserInvitationMail($invitation, $inviter,$frontendUrl));
 
@@ -131,7 +133,7 @@ class InvitateUserController extends Controller
             ], 422);
         }
  
-        $Settings = Settings::where('key','expired_link_duration')->first();
+        $Settings = Settings::where('key','expired_link_duration_in_minutes')->first();
         $expireDays = (int)$Settings->value ?? 1;
  
         // ✅ Regenerate token & activate again
@@ -152,6 +154,7 @@ class InvitateUserController extends Controller
         $frontendUrl = config('app.frontend_url')
             . 'accept-invitation?data=' . urlencode($encrypted);
  
+        TenantMailer::apply($invitation);
         Mail::to($invitation->email)
             ->send(new \App\Mail\UserInvitationMail($invitation, $user, $frontendUrl));
 

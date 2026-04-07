@@ -20,7 +20,7 @@ return new class extends Migration
             $table->string('password');
             $table->string('encryption')->nullable();
             $table->string('from_address');
-            $table->string('from_name');
+            $table->string('from_name')->nullable();
             $table->timestamps();
         });
     }

@@ -14,9 +14,25 @@ use Modules\UserManagement\Http\Controllers\Api\ModuleController;
 use Modules\UserManagement\Http\Controllers\Api\DynamicCrudController;
 use Modules\UserManagement\Http\Controllers\Api\EmailTemplateController;
 
-// Use AuthenticateSanctumMultiTenant so tokens are resolved from central or tenant DBs.
-Route::middleware([\App\Http\Middleware\AuthenticateSanctumMultiTenant::class])->group(function () {
+    
+// Public API routes
+Route::post('/verify-Mfa', [AuthController::class, 'verifyMfa']);
+Route::post('/resend-otp', [AuthController::class, 'resendOtp']);
+Route::post('/contact-us', [CommonController::class, 'contactUs']);
 
+Route::middleware(['verify.recaptcha', 'throttle:auth-limit'])->group(function () {
+    Route::post('/register', [AuthController::class, 'register']);
+    Route::post('/login', [AuthController::class, 'login']);
+    Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
+    Route::post('/reset-password', [AuthController::class, 'resetPassword']);
+});
+
+Route::middleware('auth:sanctum')->post('/email/resend', [AuthController::class, 'resendVerificationEmail']);
+Route::post('/accept-invitation', [InvitateUserController::class, 'accept']);
+
+Route::post('/refresh', [AuthController::class, 'refreshToken']);
+
+Route::middleware(\App\Http\Middleware\AuthenticateSanctumMultiTenant::class)->group(function () {
     // Role routes
     Route::prefix('roles')->group(function () {
         Route::post('/', [RoleController::class, 'store']);
@@ -36,36 +52,7 @@ Route::middleware([\App\Http\Middleware\AuthenticateSanctumMultiTenant::class])-
         Route::delete('/{id}', [PermissionController::class, 'destroy']);
         Route::post('/assign/{permissionId}', [PermissionController::class, 'assignToUser']);
     });
-});
-    
-// Public API routes
-Route::post('/verify-Mfa', [AuthController::class, 'verifyMfa']);
-Route::post('/resend-otp', [AuthController::class, 'resendOtp']);
-Route::post('/contact-us', [CommonController::class, 'contactUs']);
 
-Route::middleware(['verify.recaptcha', 'throttle:auth-limit'])->group(function () {
-    Route::post('/register', [AuthController::class, 'register']);
-    Route::post('/login', [AuthController::class, 'login']);
-    Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
-    Route::post('/reset-password', [AuthController::class, 'resetPassword']);
-});
-
-// Route::middleware('auth:sanctum')->get('/email/verify/{id}/{hash}', function (EmailVerificationRequest $request) {
-//     $request->fulfill();
-//     return response()->json(['message' => 'Email verified successfully']);
-// })->name('verification.verify');
-
-// Route::middleware('auth:sanctum')->post('/email/verification-notification', function (Request $request) {
-//     $request->user()->sendEmailVerificationNotification();
-//     return response()->json(['message' => 'Verification link sent']);
-// })->name('verification.send');
-
-Route::middleware('auth:sanctum')->post('/email/resend', [AuthController::class, 'resendVerificationEmail']);
-Route::post('/accept-invitation', [InvitateUserController::class, 'accept']);
-
-Route::post('/refresh', [AuthController::class, 'refreshToken']);
-
-Route::middleware(\App\Http\Middleware\AuthenticateSanctumMultiTenant::class)->group(function () {
     Route::get('/invitation-list', [InvitateUserController::class, 'invitationList']);
     Route::get('/invitation-details', [InvitateUserController::class, 'invitationDetails']);
     Route::post('invite', [InvitateUserController::class, 'invite']);

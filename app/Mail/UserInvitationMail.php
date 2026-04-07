@@ -50,41 +50,9 @@ class UserInvitationMail extends Mailable
         // ✅ Replace variables
         $content = $this->parseTemplate($template->content, $data);
 
-         if($this->invitation->user_type == 'tenant' && $this->invitation->tenant_id) {
-            tenancy()->initialize($this->invitation->tenant_id);
-                $smtp = SmtpSetting::first();
-            tenancy()->end();
-        } else {
-            $smtp = SmtpSetting::first();
-        }
-
-            $transport = new EsmtpTransport(
-                $smtp->host,
-                $smtp->port,
-                $smtp->encryption
-            );
-
-            $transport->setUsername($smtp->username);
-            $transport->setPassword($smtp->password);
-
-
-            $customMailer = new Mailer(
-                'dynamic',
-                app('view'),
-                $transport, // correct
-                app('events')
-            );
-
-
-            $customMailer->alwaysFrom(
-                $smtp->from_address,
-                $smtp->from_name
-            );
-
         return $this
-            ->subject($template->subject)
-            ->html($content)
-            ->mailer($customMailer);
+        ->subject($template->subject)
+        ->html($content);
     }
 
     // ✅ Helper function

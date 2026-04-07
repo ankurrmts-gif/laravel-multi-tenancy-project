@@ -6,6 +6,7 @@ use App\Models\User;
 use App\Models\Settings,App\Models\UserOtp;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use App\Support\TenantMailer;
 use Illuminate\Routing\Controller;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
@@ -132,6 +133,7 @@ class AuthController extends Controller
         // $refreshToken->accessToken->expires_at = now()->addMinutes(30);
         // $refreshToken->accessToken->save();
 
+        TenantMailer::apply($tenantUser);
         Mail::to($tenantUser->email)->send(new \App\Mail\VerifyEmailMail($tenantUser));
 
         tenancy()->initialize($tenant);
@@ -212,6 +214,8 @@ class AuthController extends Controller
                 'message' => 'Email already verified.'
             ], 400);
         }
+
+        TenantMailer::apply($user);
 
         Mail::to($user->email)->send(new \App\Mail\VerifyEmailMail($user));
 
@@ -816,6 +820,7 @@ class AuthController extends Controller
                 'expires_at'=> now()->addMinutes(intval($expired->value)) // ⏱ expiry
             ]);
 
+            TenantMailer::apply($user);
             Mail::to($user->email)
             ->send(new \App\Mail\UserOtpVerifyMail($user, $otp, $expired->value));
 
@@ -1049,7 +1054,7 @@ class AuthController extends Controller
         | SEND EMAIL
         |---------------------------------------------------------------
         */
-
+        TenantMailer::apply($user);
         Mail::to($user->email)
             ->send(new \App\Mail\UserOtpVerifyMail($user, $otp, $expired->value));
 
@@ -1207,6 +1212,7 @@ class AuthController extends Controller
         $resetUrl = config('app.frontend_url') .
             "reset-password?token={$plainToken}&email=" . urlencode($request->email);
 
+        TenantMailer::apply($user);
         Mail::to($request->email)->send(new \App\Mail\ResetPasswordMail($user, $resetUrl));
 
         return response()->json([

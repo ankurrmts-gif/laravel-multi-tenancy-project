@@ -36,67 +36,171 @@ class RoleController extends Controller
     }
 
     public function index(Request $request): JsonResponse
-    {   
+    {
         return $this->runInTenant($request->tenant_id, function () use ($request) {
+
             $permission = $request->filled('tenant_id')
-            ? 'tenant-role-access'
-            : 'role-access';
-            
-            // Clear permission cache (temporary for debug)
+                ? 'tenant-role-access'
+                : 'role-access';
+
+            // Clear permission cache (debug purpose)
             app()[\Spatie\Permission\PermissionRegistrar::class]->forgetCachedPermissions();
 
-            // echo $permission; die();
-
+            // Permission check (optional)
             // if (!$request->user()->can($permission)) {
-            //     return response()->json(['message' => 'Access Denied.'], 403);
+            //     return response()->json(['message' => 'Access Denied'], 403);
             // }
-             
-            $cacheKey = 'roles_list_' . ($request->tenant_id ?? 'central') . '_' . md5($request->fullUrl());
 
-            $roles = Cache::tags(['roles_list'])->rememberForever($cacheKey, function () use ($request) {
-                if ($request->select == true) {
-                    if ($request->filled('tenant_id')) {
-                        return Role::select('id', 'name')
-                            ->orderBy('name')
-                            ->get();
-                    } else {
-                        return Role::select('id', 'name')
-                            ->where('id', '!=', 1)
-                            ->orderBy('name')
-                            ->get();
-                    }
+            /*
+            |--------------------------------------------------------------------------
+            | SELECT MODE (dropdown)
+            |--------------------------------------------------------------------------
+            */
+            if ($request->select == true) {
+
+                if ($request->filled('tenant_id')) {
+
+                    tenancy()->initialize($request->tenant_id);
+
+                    $roles = Role::select('id', 'name')
+                        ->orderBy('name')
+                        ->get();
+
+                    tenancy()->end();
+
+                    return response()->json([
+                        'roles' => $roles
+                    ]);
                 }
-                    
-                $limit = $request->limit ?? 10;
-                $sort  = $request->sort ?? 'created_at';
-                $dir   = $request->dir ?? 'desc';
-                
-                $roles = Role::with(['permissions:id,name'])->select('id', 'name', 'created_at');
-                
-                // Search filter
-                if ($request->filled('search')) {
-                    $search = $request->search;
-                    $roles->where(function ($q) use ($search) {
-                        $q->where('name', 'like', "%{$search}%")
+
+                /*
+                |--------------------------------------------------------------------------
+                | filter by type
+                |--------------------------------------------------------------------------
+                */
+                if ($request->filled('type')) {
+
+                    $roles = Role::select('id', 'name', 'type')
+                        ->where('type', $request->type)
+                        ->orderBy('name')
+                        ->get();
+
+                    return response()->json([
+                        'roles' => $roles
+                    ]);
+                }
+
+                /*
+                |--------------------------------------------------------------------------
+                | filter based on logged-in user type
+                |--------------------------------------------------------------------------
+                */
+                $user = $request->user();
+
+                if ($user && $user->user_type == 'admin') {
+
+                    $roles = Role::select('id', 'name', 'type')
+                        ->where('type', 'agency')
+                        ->orderBy('name')
+                        ->get();
+
+                    return response()->json([
+                        'roles' => $roles
+                    ]);
+                }
+
+                if ($user && $user->user_type == 'super_admin') {
+
+                    $roles = Role::select('id', 'name', 'type')
+                        ->where('type', 'admin')
+                        ->orderBy('name')
+                        ->get();
+
+                    return response()->json([
+                        'roles' => $roles
+                    ]);
+                }
+
+                /*
+                |--------------------------------------------------------------------------
+                | default select
+                |--------------------------------------------------------------------------
+                */
+                $roles = Role::select('id', 'name', 'type')
+                    ->orderBy('name')
+                    ->get();
+
+                return response()->json([
+                    'roles' => $roles
+                ]);
+            }
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | LIST MODE (pagination)
+            |--------------------------------------------------------------------------
+            */
+
+            $limit = $request->limit ?? 10;
+            $sort  = $request->sort ?? 'created_at';
+            $dir   = $request->dir ?? 'desc';
+
+            $query = Role::with(['permissions:id,name'])
+                ->select('id', 'name', 'type', 'created_at');
+
+            /*
+            |--------------------------------------------------------------------------
+            | search filter
+            |--------------------------------------------------------------------------
+            */
+            if ($request->filled('search')) {
+
+                $search = $request->search;
+
+                $query->where(function ($q) use ($search) {
+
+                    $q->where('name', 'like', "%{$search}%")
                         ->orWhereHas('permissions', function ($q2) use ($search) {
+
                             $q2->where('name', 'like', "%{$search}%");
+
                         });
-                    });
-                }
 
-                $roles = $roles->orderBy($sort, $dir)->paginate($limit);
-
-                $roles->getCollection()->transform(function ($role) {
-                    $role->permissions->each->makeHidden('pivot');
-                    return $role;
                 });
+            }
 
-                return $roles;
+            /*
+            |--------------------------------------------------------------------------
+            | optional type filter
+            |--------------------------------------------------------------------------
+            */
+            if ($request->filled('type')) {
+
+                $query->where('type', $request->type);
+            }
+
+            $roles = $query
+                ->orderBy($sort, $dir)
+                ->paginate($limit);
+
+            /*
+            |--------------------------------------------------------------------------
+            | hide pivot
+            |--------------------------------------------------------------------------
+            */
+            $roles->getCollection()->transform(function ($role) {
+
+                $role->permissions->each->makeHidden('pivot');
+
+                return $role;
+
             });
 
             return response()->json([
                 'roles' => $roles
-            ]); 
+            ]);
+
         });
     }
 
@@ -122,7 +226,8 @@ class RoleController extends Controller
 
             $role = Role::create([
                 'name' => $validated['name'],
-                'guard_name' => 'sanctum'
+                'guard_name' => 'sanctum',
+                'type' => $request->type ? $request->type : NULL,
             ]);
 
             if (!empty($validated['permissions'])) {
@@ -152,7 +257,7 @@ class RoleController extends Controller
             //     return response()->json(['message' => 'Access Denied.'], 403);
             // }
 
-            $role = Role::with(['permissions:id,name'])->select('id', 'name', 'created_at')->find($id);
+            $role = Role::with(['permissions:id,name'])->select('id', 'name','type', 'created_at')->find($id);
 
             if (!$role) {
                 return response()->json(['message' => 'Role not found'], 404);

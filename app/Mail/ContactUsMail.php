@@ -38,35 +38,9 @@ class ContactUsMail extends Mailable
             'message'  => $this->data['message'],
         ]);
 
-        $smtp = SmtpSetting::first();
-
-        $transport = new EsmtpTransport(
-                $smtp->host,
-                $smtp->port,
-                $smtp->encryption
-            );
-
-            $transport->setUsername($smtp->username);
-            $transport->setPassword($smtp->password);
-
-
-            $customMailer = new Mailer(
-                'dynamic',
-                app('view'),
-                $transport, // correct
-                app('events')
-            );
-
-
-            $customMailer->alwaysFrom(
-                $smtp->from_address,
-                $smtp->from_name
-            );
-
-        return $this
-            ->subject($template->subject)
-            ->html($content)
-            ->mailer($customMailer);
+       return $this
+        ->subject($template->subject)
+        ->html($content);
     }
 
     private function parseTemplate($content, $data)

@@ -175,9 +175,9 @@ class UserController extends Controller
             }
             
             // $user->load('roles.permissions','tenant');
-            $user->load('roles','tenant');
+            $user->role_id = $user->roles->first() ? $user->roles->first()->id : null;
 
-            // tenancy()->end();
+            tenancy()->end();
         } else {
             $user = User::select('id', 'first_name', 'last_name', 'email', 'email_verified_at', 'user_type', 'tenant_id', 'created_at')->find($request->id);
  
@@ -192,7 +192,7 @@ class UserController extends Controller
             // }
        
             // $user->load('roles.permissions','tenant');
-            // $user->load('roles','tenant');
+             $user->role_id = $user->roles->first() ? $user->roles->first()->id : null;
         }
        
         return response()->json([
