@@ -543,9 +543,9 @@ class ModulesController extends Controller
         // Generate files
         $this->generateModuleFiles($module);
 
-        $fileService = new ModuleFileStructureService();
-        $fileService->createModuleDirectories($module->slug);
-        $fileService->createGitkeepFiles($module->slug);
+        // $fileService = new ModuleFileStructureService();
+        // $fileService->createModuleDirectories($module->slug);
+        // $fileService->createGitkeepFiles($module->slug);
 
         return response()->json([
             'success' => true,
@@ -1278,9 +1278,9 @@ class ModulesController extends Controller
         File::put("{$controllerDir}/{$controllerName}.php", $controllerContent);
 
         // ── H. Module Directories ────────────────────────────────────────────────
-        $fileService = new ModuleFileStructureService();
-        $fileService->createModuleDirectories($module->slug);
-        $fileService->createGitkeepFiles($module->slug);
+        // $fileService = new ModuleFileStructureService();
+        // $fileService->createModuleDirectories($module->slug);
+        // $fileService->createGitkeepFiles($module->slug);
     }
 
     public function destroyWithFields($id)
