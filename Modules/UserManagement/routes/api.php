@@ -19,6 +19,7 @@ use Modules\UserManagement\Http\Controllers\Api\EmailTemplateController;
 Route::post('/verify-Mfa', [AuthController::class, 'verifyMfa']);
 Route::post('/resend-otp', [AuthController::class, 'resendOtp']);
 Route::post('/contact-us', [CommonController::class, 'contactUs']);
+Route::get('/get-role', [CommonController::class, 'getRole']);
 
 Route::middleware(['verify.recaptcha', 'throttle:auth-limit'])->group(function () {
     Route::post('/register', [AuthController::class, 'register']);

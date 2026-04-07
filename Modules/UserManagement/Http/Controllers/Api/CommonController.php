@@ -734,7 +734,7 @@ class CommonController extends Controller
         }
     }
 
-        public function clearCache(): JsonResponse
+    public function clearCache(): JsonResponse
     {
         try {
             Artisan::call('cache:clear');
@@ -794,6 +794,15 @@ class CommonController extends Controller
         }
 
         return $bytes . ' B';
+    }
+
+    public function getRole()
+    {
+        $roles = Role::where('type','agency')->get();
+
+        return response()->json([
+            'roles' => $roles
+        ]);
     }
 
     public function clearRouteCache(): JsonResponse
