@@ -237,38 +237,39 @@ class DynamicController extends Controller
                 'user_id'   => $user->id
             ])->get();
 
-            if ($modulePermissions->isNotEmpty()) {
+                if($module->created_by == $user->id){
+                        $permissionActions = [
+                            1 => 'access',
+                            2 => 'create',
+                            3 => 'edit',
+                            4 => 'show',
+                            5 => 'delete',
+                        ];
+                    foreach($permissionActions as $permission){
+                        $module_permission[] = $module->slug . '_' . $permission;
+                    }
+                    }else{
+                        if ($modulePermissions->isNotEmpty()) {
 
-                // ✅ Use module permissions
-                $module_permission = $modulePermissions->pluck('permission_name'); 
-                // change column if your field name is different
+                    // ✅ Use module permissions
+                    $module_permission = $modulePermissions->pluck('permission_name'); 
+                    // change column if your field name is different
 
-            } else {
+                } else {
 
-                // ✅ Fallback to role permissions
-                $module_permission = $user->roles()
-                ->whereHas('permissions', function ($q) use ($module) {
-                    $q->where('name', 'like', $module->slug . '_%');
-                })
-                ->with(['permissions' => function ($q) use ($module) {
-                    $q->where('name', 'like', $module->slug . '_%');
-                }])
-                ->get()
-                ->pluck('permissions')
-                ->flatten()
-                ->pluck('name')
-                ->values(); // assuming permission column = name
-            }
-            if($module->created_by == $user->id){
-                    $permissionActions = [
-                        1 => 'access',
-                        2 => 'create',
-                        3 => 'edit',
-                        4 => 'show',
-                        5 => 'delete',
-                    ];
-                foreach($permissionActions as $permission){
-                    $module_permission[] = $module->slug . '_' . $permission;
+                    // ✅ Fallback to role permissions
+                    $module_permission = $user->roles()
+                    ->whereHas('permissions', function ($q) use ($module) {
+                        $q->where('name', 'like', $module->slug . '_%');
+                    })
+                    ->with(['permissions' => function ($q) use ($module) {
+                        $q->where('name', 'like', $module->slug . '_%');
+                    }])
+                    ->get()
+                    ->pluck('permissions')
+                    ->flatten()
+                    ->pluck('name')
+                    ->values(); // assuming permission column = name
                 }
              }
         }else{
