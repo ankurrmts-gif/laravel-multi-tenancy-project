@@ -52,7 +52,6 @@ class DatabaseSeeder extends Seeder
             'master-module-show',
             'master-module-delete',
             'user-access',
-            'user-create',
             'user-edit',
             'user-show',
             'user-delete'

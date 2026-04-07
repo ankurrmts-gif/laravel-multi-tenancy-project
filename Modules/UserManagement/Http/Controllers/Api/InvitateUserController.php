@@ -313,7 +313,6 @@ class InvitateUserController extends Controller
             }
             $allPermissions = collect([
                 'user-access',
-                'user-create',
                 'user-edit',
                 'user-show',
                 'user-delete',  
