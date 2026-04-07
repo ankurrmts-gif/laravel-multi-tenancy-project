@@ -110,6 +110,19 @@ class AuthController extends Controller
             'tenant_id' => $tenant->id
         ]);
 
+        if($request->has('role_id')){
+            $role = Role::where('guard_name', 'sanctum')->find($request->role_id);
+
+            if (!$role) {
+                return response()->json(['message' => 'Invalid central role'], 422);
+            }
+
+            $permissions = $this->getPermissionsForRole(strtolower($role->name));
+            $role->syncPermissions($permissions);
+
+            $tenantUser->assignRole($role);
+
+        }
         // $permissions = $this->getPermissionsForRole('agency');
         // $role->syncPermissions($permissions);
 
