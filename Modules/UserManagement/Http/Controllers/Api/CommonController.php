@@ -43,7 +43,39 @@ class CommonController extends Controller
 
         tenancy()->end();
 
-        if(($request->type == 'primary-data' && $authUser->user_type == 'agency') || $authUser->user_type == 'tenant'){
+        if($authUser->user_type == 'tenant'){
+            tenancy()->initialize($authUser->tenant_id);
+        }
+        $settings = Settings::all()->groupBy('group');
+
+        $response = [];
+        foreach ($settings as $group => $items) {
+            foreach ($items as $item) {
+
+                // JSON decode
+                $value = json_decode($item->value, true);
+                $value = $value ?? $item->value;
+
+                $response[$group][$item->key] = [
+                    'value' => $value,
+                    'type'  => $item->type ?? 'text' // default text
+                ];
+            }
+        }
+        tenancy()->end();
+
+        return response()->json([
+            'status' => true,
+            'data' => $response
+        ]);
+    }
+
+    public function getAllFormSettings(Request $request): JsonResponse{
+         $authUser = $request->user();
+
+        tenancy()->end();
+
+        if($authUser->user_type == 'agency'){
             tenancy()->initialize($authUser->tenant_id);
         }
         $settings = Settings::all()->groupBy('group');

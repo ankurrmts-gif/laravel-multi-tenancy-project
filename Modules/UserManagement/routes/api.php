@@ -78,6 +78,7 @@ Route::middleware(\App\Http\Middleware\AuthenticateSanctumMultiTenant::class)->g
     Route::get('get-all-users', [UserController::class, 'getAllUsers']);
 
     Route::get('get-all-settings', [CommonController::class, 'getAllSettings']);
+    Route::get('get-all-form-settings', [CommonController::class, 'getAllFormSettings']);
     Route::get('get-setting-details', [CommonController::class, 'getSettingDetails']);
     Route::post('add-settings', [CommonController::class, 'addSettings']);
     Route::post('update-settings', [CommonController::class, 'updateSettings']);
