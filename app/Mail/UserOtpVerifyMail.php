@@ -28,13 +28,10 @@ class UserOtpVerifyMail extends Mailable
         $template = EmailTemplate::where('slug','otp-verify')->first();
 
         $content = $this->parseTemplate($template->content,[
-
             'username' => $this->user->first_name,
-
             'otp' => $this->otp,
-
             'expiry' => $this->expired,
-
+            'app_name'   => config('app.name'),
             'year' => date('Y')
 
         ]);

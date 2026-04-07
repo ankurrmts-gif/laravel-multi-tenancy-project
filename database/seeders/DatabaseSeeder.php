@@ -566,7 +566,7 @@ class DatabaseSeeder extends Seeder
             'password' => 'ngbj xdyc rrkl rydf',
             'encryption' => 'SSL',
             'from_address' => 'ankur.r.mts@gmail.com',
-            'from_name' => env('APP_NAME')
+            'from_name' => config('app.name')
         ]);
  
         $this->command->info('Super Admin created with ALL permissions');
