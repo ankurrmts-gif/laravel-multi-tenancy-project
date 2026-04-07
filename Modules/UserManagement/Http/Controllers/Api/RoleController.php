@@ -56,11 +56,13 @@ class RoleController extends Controller
             | SELECT MODE (dropdown)
             |--------------------------------------------------------------------------
             */
+            
+            $user = $request->user();
             if ($request->select == true) {
 
-                if ($request->filled('tenant_id')) {
+                if ($user && $user->tenant_id) {
 
-                    tenancy()->initialize($request->tenant_id);
+                    tenancy()->initialize($user->tenant_id);
 
                     $roles = Role::select('id', 'name')
                         ->orderBy('name')
@@ -95,7 +97,6 @@ class RoleController extends Controller
                 | filter based on logged-in user type
                 |--------------------------------------------------------------------------
                 */
-                $user = $request->user();
 
                 if ($user && $user->user_type == 'admin') {
 
