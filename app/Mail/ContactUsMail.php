@@ -9,6 +9,7 @@ use Symfony\Component\Mailer\Transport\Smtp\EsmtpTransport;
 use Symfony\Component\Mailer\Mailer as SymfonyMailer;
 use Illuminate\Mail\Mailer;
 use App\Models\EmailTemplate;
+use App\Models\Settings;
 use App\Models\SmtpSetting;
 
 class ContactUsMail extends Mailable
@@ -26,17 +27,22 @@ class ContactUsMail extends Mailable
     {
         // ✅ Get template from DB
         $template = EmailTemplate::where('slug', 'contact-us')->first();
+        $Settings = Settings::pluck('value', 'key')->toArray();
 
         if (!$template) {
             throw new \Exception('Contact email template not found');
         }
 
-        // ✅ Replace variables
-        $content = $this->parseTemplate($template->content, [
+        $data = array_merge([
             'username' => $this->data['name'],
             'email'    => $this->data['email'],
             'message'  => $this->data['message'],
-        ]);
+            'app_name' => config('app.name'),
+            'year'     => date('Y'),
+        ], $Settings);
+
+        // ✅ Replace variables
+        $content = $this->parseTemplate($template->content, $data);
 
        return $this
         ->subject($template->subject)

@@ -27,6 +27,14 @@ class EmailTemplateController extends Controller
         $limit = $request->limit ?? 10;
         $sort  = $request->sort ?? 'created_at';
         $dir   = $request->dir ?? 'desc';
+        
+        $authUser = $request->user();
+        tenancy()->end();
+
+
+        if($authUser->user_type == 'agency'){
+            tenancy()->initialize($authUser->tenant_id);
+        }
 
         $query = EmailTemplate::query();
 
@@ -40,22 +48,44 @@ class EmailTemplateController extends Controller
             });
         }
 
+        //echo "<pre>"; print_r($query->get()); echo "</pre>"; die();
+
         $emailTemplates = $query->orderBy($sort, $dir)->paginate($limit);
+
+        // if (tenancy()->initialized) {
+        //     tenancy()->end();
+        // }
 
         return response()->json($emailTemplates);
     }
 
-    public function show($id): JsonResponse
+    public function show(Request $request): JsonResponse
     {
-        $emailTemplate = EmailTemplate::find($id);
+
+        $authUser = $request->user();
+        tenancy()->end();
+
+        if($authUser->user_type == 'agency'){
+            tenancy()->initialize($authUser->tenant_id);
+        }
+
+        $emailTemplate = EmailTemplate::find($request->id);
         if (!$emailTemplate) {
             return response()->json(['message' => 'Email Template not found'], 404);
         }
+
         return response()->json($emailTemplate);
     }
 
     public function store(Request $request): JsonResponse
     {
+        $authUser = $request->user();
+        tenancy()->end();
+
+        if($authUser->user_type == 'agency'){
+            tenancy()->initialize($authUser->tenant_id);
+        }
+
         $validator = Validator::make($request->all(), [
             'title' => 'required|string|max:255',
             'subject' => 'required|string|max:255',
@@ -76,6 +106,7 @@ class EmailTemplateController extends Controller
             'variable' => $request->variable,
         ]);
 
+
         return response()->json([
             'success' => true,
             'message' => 'Email Template Created',
@@ -86,7 +117,7 @@ class EmailTemplateController extends Controller
     public function update(Request $request): JsonResponse
     {
         $validator = Validator::make($request->all(), [
-            'id' => 'required|exists:email_tamplate,id',
+            'id' => 'required',
             'title' => 'required|string|max:255',
             'subject' => 'required|string|max:255',
             'content' => 'required|string',
@@ -96,12 +127,20 @@ class EmailTemplateController extends Controller
             return response()->json(['errors' => $validator->errors()], 422);
         }
 
+        $authUser = $request->user();
+        tenancy()->end();
+
+        if($authUser->user_type == 'agency'){
+            tenancy()->initialize($authUser->tenant_id);
+        }
+
         $emailTemplate = EmailTemplate::find($request->id);
         $emailTemplate->update([
             'title' => $request->title,
             'subject' => $request->subject,
             'content' => $request->content,
         ]);
+
         
         return response()->json([
             'success' => true,
