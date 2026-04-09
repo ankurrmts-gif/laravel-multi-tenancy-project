@@ -834,7 +834,7 @@ class DynamicController extends Controller
 
         /*
         |--------------------------------------------------
-        | MULTIPLE FILES (file + base64)
+        | MULTIPLE FILES (file + base64) - APPEND ONLY
         |--------------------------------------------------
         */
         foreach ($module->fields as $field) {
@@ -848,23 +848,7 @@ class DynamicController extends Controller
 
                 if ($request->hasFile($column) || $request->has($column)) {
 
-                    // delete old files
-                    $oldFiles = DB::table($attachTable)
-                        ->where("{$fk}_id", $id)
-                        ->get();
-
-                    foreach ($oldFiles as $file) {
-                        if (!empty($file->file_path) &&
-                            Storage::disk('public')->exists($file->file_path)) {
-                            Storage::disk('public')->delete($file->file_path);
-                        }
-                    }
-
-                    DB::table($attachTable)
-                        ->where("{$fk}_id", $id)
-                        ->delete();
-
-                    // insert new files
+                    // 🎯 APPEND NEW FILES (DON'T DELETE OLD ONES)
                     $filesData = $this->handleMultipleFiles($request, $table, $fk, $field, $id);
 
                     if (!empty($filesData)) {
@@ -1019,6 +1003,101 @@ class DynamicController extends Controller
 
         return response()->json([
             'message' => 'Deleted successfully'
+        ]);
+    }
+
+    /*
+    |--------------------------------------------------
+    | DELETE ATTACHMENT (DYNAMIC - FILES & PHOTOS)
+    |--------------------------------------------------
+    */
+    public function deleteAttachment(Request $request, $slug)
+    {
+        $module = $this->getModule($slug);
+        $table  = Str::plural($module->slug);
+        $fk     = Str::singular($module->slug);
+
+        $request->validate([
+            'attachment_id' => 'required|integer',
+            'record_id' => 'required|integer',
+            'field_name' => 'nullable|string'  // Optional: specify which field
+        ]);
+
+        $attachmentId = $request->attachment_id;
+        $recordId = $request->record_id;
+        $fieldName = $request->field_name;
+
+        $deleted = false;
+
+        // If field_name is provided, delete from that specific field table
+        if ($fieldName) {
+            $field = $module->fields->where('db_column', $fieldName)->first();
+
+            if (!$field) {
+                return response()->json(['message' => 'Field not found'], 404);
+            }
+
+            $inputType = $field->column_type_id ?? $field->columnType->column_type_id;
+
+            // Check if it's a file/photo field
+            if (in_array($inputType, [14, 15]) && $field->is_multiple) { // 14=File, 15=Photo
+
+                $attachTable = "{$table}_" . Str::plural($field->db_column);
+
+                $attachment = DB::table($attachTable)
+                    ->where('id', $attachmentId)
+                    ->where("{$fk}_id", $recordId)
+                    ->first();
+
+                if ($attachment) {
+                    // Delete from storage
+                    if (!empty($attachment->file_path) &&
+                        Storage::disk('public')->exists($attachment->file_path)) {
+                        Storage::disk('public')->delete($attachment->file_path);
+                    }
+
+                    // Delete from database
+                    DB::table($attachTable)->where('id', $attachmentId)->delete();
+                    $deleted = true;
+                }
+            }
+        } else {
+            // Search all file/photo fields (auto-detect)
+            foreach ($module->fields as $field) {
+                $inputType = $field->column_type_id ?? $field->columnType->column_type_id;
+
+                if (in_array($inputType, [14, 15]) && $field->is_multiple) { // 14=File, 15=Photo
+
+                    $attachTable = "{$table}_" . Str::plural($field->db_column);
+
+                    $attachment = DB::table($attachTable)
+                        ->where('id', $attachmentId)
+                        ->where("{$fk}_id", $recordId)
+                        ->first();
+
+                    if ($attachment) {
+                        // Delete from storage
+                        if (!empty($attachment->file_path) &&
+                            Storage::disk('public')->exists($attachment->file_path)) {
+                            Storage::disk('public')->delete($attachment->file_path);
+                        }
+
+                        // Delete from database
+                        DB::table($attachTable)->where('id', $attachmentId)->delete();
+
+                        $deleted = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (!$deleted) {
+            return response()->json(['message' => 'Attachment not found'], 404);
+        }
+
+        return response()->json([
+            'message' => 'Attachment deleted successfully'
         ]);
     }
 }

@@ -42,4 +42,7 @@ Route::middleware(\App\Http\Middleware\AuthenticateSanctumMultiTenant::class)->g
     Route::post('dynamic/update/{slug}', [DynamicController::class, 'update']);
     Route::delete('dynamic/{slug}/{id}', [DynamicController::class, 'destroy']);
 
+    // Delete Attachment (Dynamic - Files & Photos)
+    Route::post('dynamic/{slug}/delete-attachment', [DynamicController::class, 'deleteAttachment']);
+
 });
