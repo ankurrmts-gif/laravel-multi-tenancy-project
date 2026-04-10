@@ -302,16 +302,81 @@ class DynamicController extends Controller
         // latest records
         $data = $query->latest()->paginate(10);
 
-       $fields = ModuleField::with('options')->select('id','db_column','label','column_type_id','is_multiple','visibility','created_at')->where('module_id', $module->id) 
-            ->get();
+            $fields = ModuleField::select(
+            'id',
+            'db_column',
+            'label',
+            'column_type_id',
+            'is_multiple',
+            'visibility',
+            'model_name',
+            'created_at'
+        )
+        ->where('module_id', $module->id)
+        ->get();
 
-        // response
-        return response()->json([
-            'fields' => $fields,
-            'data' => $data,
-            'action' => $module->actions,
-            'module_permission' => $module_permission
-        ]);
+    $responseFields = [];
+
+    foreach ($fields as $field) {
+
+        $fieldData = [
+            'id' => $field->id,
+            'name' => $field->db_column,
+            'label' => $field->label,
+            'type' => $this->mapFieldType($field->column_type_id),
+            'is_multiple' => (bool) $field->is_multiple,
+            'visibility' => $field->visibility,
+            'model_name' => $field->model_name,
+            'created_at' => $field->created_at,
+        ];
+
+        /*
+        |------------------------------------------
+        | Dynamic relationship options
+        |------------------------------------------
+        */
+        if (!empty($field->model_name)) {
+
+            $relatedTable = strtolower(Str::plural($field->model_name));
+
+            if (Schema::hasTable($relatedTable)) {
+
+                $options = DB::table($relatedTable)
+                    ->select('id as value', 'name as label') // change name column if needed
+                    ->get();
+
+                if ($options->isNotEmpty()) {
+                    $fieldData['options'] = $options;
+                }
+            }
+        }
+
+        /*
+        |------------------------------------------
+        | Static options from module_field_options
+        |------------------------------------------
+        */
+        elseif (in_array($field->column_type_id, [5,6])) {
+
+            $options = DB::table('module_field_options')
+                ->where('module_field_id', $field->id)
+                ->select('option_value as value','option_label as label')
+                ->get();
+
+            if ($options->isNotEmpty()) {
+                $fieldData['options'] = $options;
+            }
+        }
+
+        $responseFields[] = $fieldData;
+    }
+
+    return response()->json([
+        'fields' => $responseFields,
+        'data' => $data,
+        'action' => $module->actions,
+        'module_permission' => $module_permission
+    ]);
     }
 
     //create 
@@ -807,7 +872,7 @@ class DynamicController extends Controller
             */
             if ($field->is_multiple && !$field->model_name && $inputType == 3) {
 
-                $data[$column] = json_encode($request->{$column} ?? []);
+                $data[$column] = $request->{$column} ?? null;
                 continue;
             }
 
@@ -816,7 +881,7 @@ class DynamicController extends Controller
             | NORMAL FIELD
             |------------------------------------------
             */
-            if (!$field->is_multiple && !$field->model_name) {
+            if (!$field->is_multiple) {
 
                 $data[$column] = $request->{$column};
             }
@@ -892,6 +957,8 @@ class DynamicController extends Controller
                 }
             }
         }
+
+        $this->handlePivot($request, $module, $id);
 
         return response()->json([
             'message' => 'Updated successfully'
