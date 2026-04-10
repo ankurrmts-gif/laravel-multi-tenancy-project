@@ -9,6 +9,7 @@ use App\Models\EmailTemplate;
 use Symfony\Component\Mailer\Transport\Smtp\EsmtpTransport;
 use Symfony\Component\Mailer\Mailer as SymfonyMailer;
 use Illuminate\Mail\Mailer;
+use App\Models\Settings;
 use App\Models\SmtpSetting;
 
 class UserInvitationMail extends Mailable
@@ -28,15 +29,22 @@ class UserInvitationMail extends Mailable
 
     public function build()
     {
+        if($this->invitation->user_type == 'tenant'){
+            tenancy()->initialize($this->invitation->tenant_id);
+        }else{
+            tenancy()->end();
+        }
         // ✅ Get template from DB
         $template = EmailTemplate::where('slug', 'invitation')->first();
+         $Settings = Settings::pluck('value', 'key')->toArray();
 
         if (!$template) {
             throw new \Exception('Invitation email template not found');
         }
 
         // ✅ Prepare data
-        $data = [
+    
+        $data = array_merge([
             'username'        => $this->invitation->first_name.' '.$this->invitation->last_name ?? 'User',
             'inviter_name'    => $this->inviter->first_name.' '.$this->inviter->last_name ?? 'Inviter',
             'inviter_role'    => $this->inviter->getRoleNames()->first(),
@@ -45,7 +53,8 @@ class UserInvitationMail extends Mailable
             'invitation_link' => $this->frontendUrl,
             'app_name'        => config('app.name'),
             'year'            => date('Y'),
-        ];
+            'logo' => asset($Settings['logo']),
+        ], $Settings);
 
         // ✅ Replace variables
         $content = $this->parseTemplate($template->content, $data);

@@ -39,6 +39,7 @@ class ContactUsMail extends Mailable
             'message'  => $this->data['message'],
             'app_name' => config('app.name'),
             'year'     => date('Y'),
+            'logo' => asset($Settings['logo']),
         ], $Settings);
 
         // ✅ Replace variables

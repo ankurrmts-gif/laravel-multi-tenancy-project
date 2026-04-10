@@ -12,6 +12,7 @@ use Symfony\Component\Mailer\Transport\Smtp\EsmtpTransport;
 use Symfony\Component\Mailer\Mailer as SymfonyMailer;
 use Illuminate\Mail\Mailer;
 use App\Models\SmtpSetting;
+use App\Models\Settings;
 
 class VerifyEmailMail extends Mailable
 {
@@ -33,18 +34,23 @@ class VerifyEmailMail extends Mailable
 
         // ✅ Get template
         $template = EmailTemplate::where('slug', 'email-verify')->first();
+        $Settings = Settings::pluck('value', 'key')->toArray();
 
         if (!$template) {
             throw new \Exception('Email verify template not found');
         }
 
         // ✅ Replace variables
-        $content = $this->parseTemplate($template->content, [
+        $data = array_merge([
             'username' => $this->user->first_name . ' ' . $this->user->last_name ?? 'User',
             'verification_link' => $verificationUrl,
             'app_name' => config('app.name'),
             'year' => date('Y'),
-        ]);
+            'logo' => asset($Settings['logo']),
+        ], $Settings);
+
+        // ✅ Replace variables
+        $content = $this->parseTemplate($template->content, $data);
 
         return $this
         ->subject($template->subject)
