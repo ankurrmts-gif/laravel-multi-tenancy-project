@@ -302,7 +302,7 @@ class DynamicController extends Controller
         // latest records
         $data = $query->latest()->paginate(10);
 
-            $fields = ModuleField::select(
+        $fields = ModuleField::select(
             'id',
             'db_column',
             'label',
@@ -323,6 +323,7 @@ class DynamicController extends Controller
             'id' => $field->id,
             'name' => $field->db_column,
             'label' => $field->label,
+            'column_type_id' => $field->column_type_id,
             'type' => $this->mapFieldType($field->column_type_id),
             'is_multiple' => (bool) $field->is_multiple,
             'visibility' => $field->visibility,

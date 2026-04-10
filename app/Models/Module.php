@@ -43,7 +43,12 @@ class Module extends Model
 
     public function assignedAgencies()
     {
-        return $this->belongsToMany(\App\Models\Agency::class, 'customer_assign');
+        return $this->belongsToMany(
+            \App\Models\User::class,
+            'customer_assign',
+            'module_id',
+            'agency_id'
+        );
     }
 
     public function permissions()

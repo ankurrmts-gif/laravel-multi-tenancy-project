@@ -556,7 +556,12 @@ class ModulesController extends Controller
 
     public function show($id)
     {
-        $module = Module::with(['fields.options', 'assignedAdmins', 'assignedAgencies'])->findOrFail($id);
+        $module = Module::with([
+            'fields.options',
+            'assignedAdmins:id,first_name,last_name',
+            'assignedAgencies:id,first_name,last_name'
+        ])->findOrFail($id);
+        
         return response()->json(['success' => true, 'data' => $module]);
     }
 
@@ -965,7 +970,8 @@ class ModulesController extends Controller
                 $upStatements   .= "\n        \$table->unsignedBigInteger('{$col}')->nullable();";
                 $downStatements .= "\n        \$table->dropColumn('{$col}');";
             } elseif (!in_array($inputType, [14, 15])) {
-                $upStatements   .= "\n        \$table->{$type}('{$col}')->nullable();";
+                // $upStatements   .= "\n        \$table->{$type}('{$col}')->nullable();";
+                $upStatements   .= $this->buildColumnStatement($col, $type);
                 $downStatements .= "\n        \$table->dropColumn('{$col}');";
             } elseif (in_array($inputType, [14, 15]) && !$field->is_multiple) {
                 $upStatements   .= "\n        \$table->string('{$col}')->nullable();";
@@ -1282,6 +1288,43 @@ class ModulesController extends Controller
         // $fileService = new ModuleFileStructureService();
         // $fileService->createModuleDirectories($module->slug);
         // $fileService->createGitkeepFiles($module->slug);
+    }
+
+    private function buildColumnStatement(string $col, string $type): string
+    {
+        // decimal(10,2)
+        if (preg_match('/^decimal\((\d+),(\d+)\)$/i', $type, $m)) {
+            return "\n        \$table->decimal('{$col}', {$m[1]}, {$m[2]})->nullable();";
+        }
+
+        // float(8,2)
+        if (preg_match('/^float\((\d+),(\d+)\)$/i', $type, $m)) {
+            return "\n        \$table->float('{$col}', {$m[1]}, {$m[2]})->nullable();";
+        }
+
+        // double(8,2)
+        if (preg_match('/^double\((\d+),(\d+)\)$/i', $type, $m)) {
+            return "\n        \$table->double('{$col}', {$m[1]}, {$m[2]})->nullable();";
+        }
+
+        // enum('val1','val2')
+        if (preg_match('/^enum\((.+)\)$/i', $type, $m)) {
+            $values = array_map(
+                fn($v) => "'" . trim($v, " '\"") . "'",
+                explode(',', $m[1])
+            );
+            $valuesStr = implode(', ', $values);
+            return "\n        \$table->enum('{$col}', [{$valuesStr}])->nullable();";
+        }
+
+        // string(255) / varchar(255) / char(100)
+        if (preg_match('/^(?:string|varchar|char)\((\d+)\)$/i', $type, $m)) {
+            return "\n        \$table->string('{$col}', {$m[1]})->nullable();";
+        }
+
+        // Simple types: integer, bigInteger, string, text,
+        //               boolean, date, datetime, timestamp, json, etc.
+        return "\n        \$table->{$type}('{$col}')->nullable();";
     }
 
     public function destroyWithFields($id)
@@ -1633,7 +1676,8 @@ PHP;
 
         // NORMAL FIELD
         if (!in_array($inputType, [14,15])) {
-            $migrationContent .= "\n    \$table->{$type}('{$field->db_column}')->nullable();";
+            // $migrationContent .= "\n    \$table->{$type}('{$field->db_column}')->nullable();";
+            $migrationContent .= $this->buildColumnStatement($field->db_column, $type);
         }
 
         // SINGLE FILE

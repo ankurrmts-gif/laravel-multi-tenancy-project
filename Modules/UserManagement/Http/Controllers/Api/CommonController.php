@@ -34,6 +34,16 @@ use App\Models\DatatableSetting;
  
 class CommonController extends Controller
 {  
+    public function getGlobalSettings(Request $request): JsonResponse
+    {
+        $settings = Settings::select('key', 'value')->where('type', 'file')->get();
+
+        return response()->json([
+            'status' => true,
+            'data' => $settings
+        ]);
+    }
+
     public function getAllSettings(Request $request): JsonResponse
     {
        // if (!$request->user()->can('settings-access')) {
@@ -909,17 +919,19 @@ class CommonController extends Controller
                 ? $setting->settings
                 : json_decode($setting->settings, true);
 
-            // json_decode fail thay to fallback
             if (json_last_error() === JSON_ERROR_NONE && !empty($settings)) {
                 return response()->json([
-                    'settings' => $settings
+                    'module_type' => $setting->module_type,
+                    'module_id'   => $setting->module_id,
+                    'settings'    => $settings
                 ]);
             }
         }
 
-        // fallback only when no valid data
         return response()->json([
-            'settings' => $this->defaultSettings()
+            'module_type' => null,
+            'module_id'   => null,
+            'settings'    => $this->defaultSettings()
         ]);
     }
 
@@ -927,6 +939,9 @@ class CommonController extends Controller
     public function saveSettings(Request $request, $table)
     {
         $validated = $request->validate([
+            'module_type'        => 'required|string',
+            'module_id'          => 'nullable|integer',
+
             'sort.field'        => 'required|string',
             'sort.order'        => 'required|in:asc,desc',
 
@@ -935,7 +950,6 @@ class CommonController extends Controller
             'columns.*.label'   => 'required|string',
             'columns.*.visible' => 'required|boolean',
 
-            // ✅ ADD THIS
             'export'            => 'required|array',
             'export.csv'        => 'required|boolean',
             'export.excel'      => 'required|boolean',
@@ -948,7 +962,9 @@ class CommonController extends Controller
 
         DatatableSetting::updateOrCreate(
             [
-                'table_key' => $table
+                'table_key' => $table,
+                'module_type' => $validated['module_type'],
+                'module_id'   => $validated['module_id']
             ],
             [
                 'settings' => json_encode($validated)
@@ -1027,19 +1043,19 @@ class CommonController extends Controller
                     "label" => "Created At",
                     "visible" => true
                 ], [
-                    "key" => "updated_at",
-                    "label" => "Updated At",
-                    "visible" => true
-                ], [
                     "key" => "action",
                     "label" => "Action",
                     "visible" => true
                 ]
             ],
+            "export" => [
+                "csv" => false,
+                "excel" => false,
+                "pdf" => false
+            ],
             "pagination" => 10,
-            "search_status" => 1,
-            "filter_status" => 0
+            "search_status" => true,
+            "filter_status" => false
         ];
     }
-
 }

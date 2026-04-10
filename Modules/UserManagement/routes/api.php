@@ -33,6 +33,8 @@ Route::post('/accept-invitation', [InvitateUserController::class, 'accept']);
 
 Route::post('/refresh', [AuthController::class, 'refreshToken']);
 
+Route::get('get-global-settings', [CommonController::class, 'getGlobalSettings']);
+
 Route::middleware(\App\Http\Middleware\AuthenticateSanctumMultiTenant::class)->group(function () {
     // Role routes
     Route::prefix('roles')->group(function () {
