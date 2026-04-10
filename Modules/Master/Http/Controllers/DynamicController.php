@@ -341,9 +341,7 @@ class DynamicController extends Controller
 
             if (Schema::hasTable($relatedTable)) {
 
-                $options = DB::table($relatedTable)
-                    ->select('id as value', 'name as label') // change name column if needed
-                    ->get();
+                $options = DB::table($relatedTable)->get();
 
                 if ($options->isNotEmpty()) {
                     $fieldData['options'] = $options;
