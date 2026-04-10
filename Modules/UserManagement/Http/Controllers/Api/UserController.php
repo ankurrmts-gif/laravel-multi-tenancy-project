@@ -426,7 +426,7 @@ class UserController extends Controller
 
     public function getAgency(Request $request)
     {
-        $tenant = Tenant::select('id', 'agency_name')->get();
+        $tenant = User::select('id', 'first_name','last_name')->where('user_type', 'agency')->get();
  
         return response()->json([
             'agency' => $tenant
