@@ -23,9 +23,7 @@ class DynamicController extends Controller
     private function getModule($slug)
     {
         tenancy()->end();
-        return Module::with('fields.options','permissions')
-            ->where('slug', $slug)
-            ->firstOrFail();
+        return Module::where('slug', $slug)->firstOrFail();
     }
 
     /*
@@ -304,7 +302,7 @@ class DynamicController extends Controller
         // latest records
         $data = $query->latest()->paginate(10);
 
-       $fields = ModuleField::select('id','db_column','label','column_type_id','is_multiple','visibility','created_at')->where('module_id', $module->id) 
+       $fields = ModuleField::with('options')->select('id','db_column','label','column_type_id','is_multiple','visibility','created_at')->where('module_id', $module->id) 
             ->get();
 
         // response
@@ -319,9 +317,14 @@ class DynamicController extends Controller
     //create 
     public function create(Request $request,$slug)
     {
-        //echo "<pre>"; print_r($request->user()); die();
         tenancy()->end();
+
         $module = $this->getModule($slug);
+
+        $fields = $module->fields;
+
+        // hide relation from JSON response
+        $module->makeHidden(['fields']);
 
         $response = [
             'module' => $module,
@@ -341,18 +344,13 @@ class DynamicController extends Controller
                 'tooltip_text' => $field->tooltip_text,
                 'is_ckeditor' => $field->is_ckeditor,
                 'default_value' => $field->default_value,
-                'is_multiple' => $field->is_multiple,
                 'max_file_size' => $field->max_file_size,
                 'order_number' => $field->order_number,
                 'visibility' => $field->visibility,
                 'is_checked' => $field->is_checked,
             ];
 
-            /*
-            |--------------------------------------------------
-            | STATIC SELECT OPTIONS
-            |--------------------------------------------------
-            */
+            // static options
             if (($inputType == 5 || $inputType == 6) && !$field->model_name) {
 
                 $options = DB::table('module_field_options')
@@ -362,11 +360,7 @@ class DynamicController extends Controller
                 $fieldData['options'] = $options;
             }
 
-            /*
-            |--------------------------------------------------
-            | DYNAMIC SELECT OPTIONS (RELATION)
-            |--------------------------------------------------
-            */
+            // dynamic options
             if ($field->model_name) {
 
                 $relatedTable = strtolower(Str::plural($field->model_name));
