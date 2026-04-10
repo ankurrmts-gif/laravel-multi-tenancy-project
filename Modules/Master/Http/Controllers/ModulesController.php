@@ -186,14 +186,15 @@ class ModulesController extends Controller
             tenancy()->end();
         }
 
+        if($module->created_by == $user->id){
+            return true;
+        }
+
         // user_type restrictions
         if (! empty($module->user_type) && $module->user_type !== 'all' && $module->user_type !== $user->user_type) {
             return false;
         }
 
-        if($module->created_by == $user->id){
-            return true;
-        }
 
         $permissionCount = ModulePermission::where('module_id', $module->id)->where('permission_name', $permissionName)->count();
 
